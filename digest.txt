@@ -1,0 +1,335 @@
+Directory structure:
+└── lost-middle-analyzer/
+    ├── README.md
+    ├── app.py
+    ├── Dockerfile
+    ├── requirements.txt
+    ├── .env.example
+    ├── core/
+    │   ├── evaluation.py
+    │   ├── generator.py
+    │   ├── models.py
+    │   └── methods/
+    │       ├── full_context.py
+    │       ├── hybrid_rag.py
+    │       ├── map_reduce.py
+    │       ├── query_summarization.py
+    │       ├── rag_bm25.py
+    │       ├── re_ranking.py
+    │       └── sliding_window.py
+    └── data/
+        └── sample_corpus.txt
+
+================================================
+FILE: README.md
+================================================
+[Empty file]
+
+
+================================================
+FILE: app.py
+================================================
+import streamlit as st
+import random
+from core.generator import make_dataset
+from core.evaluation import run_experiment, plot_accuracy_by_position, plot_accuracy_by_context
+from core.models import get_model
+from core.methods.full_context import FullContext
+from core.methods.sliding_window import SlidingWindow
+from core.methods.rag_bm25 import RAGBM25
+from core.methods.map_reduce import MapReduce
+from core.methods.re_ranking import ReRanking
+from core.methods.query_summarization import QuerySummarization
+from core.methods.hybrid_rag import HybridRAG
+
+st.set_page_config(page_title="Lost-in-the-Middle Analyzer", page_icon="📏", layout="wide")
+st.title("📏 Lost-in-the-Middle Analyzer")
+
+with st.sidebar:
+    st.header("Model & Method")
+    provider = st.selectbox("LLM Provider", ["dummy-local", "vertex-gemini", "openai"], index=0)
+    model_name = st.text_input("Model name (provider-specific)", value="dummy-echo")
+
+    method_name = st.selectbox("Method", [
+        "FullContext",
+        "SlidingWindow",
+        "RAG-BM25",
+        "Map-Reduce",
+        "Re-Ranking",
+        "Query-Summarization",
+        "Hybrid-RAG"
+    ], index=2)
+    top_k = st.slider("top_k / windows", 1, 10, 3)
+    window_size = st.slider("Window size (tokens, approx)", 200, 4000, 800, step=100)
+
+    st.header("Dataset")
+    n_docs = st.slider("# docs", 10, 300, 50, step=10)
+    context_len = st.slider("Context length (tokens, approx)", 500, 12000, 3000, step=500)
+    positions = st.multiselect("Answer positions", ["start", "middle", "end"], default=["start","middle","end"])
+
+    seed = st.number_input("Random seed", value=42)
+    run_btn = st.button("Run Experiment 🚀")
+
+# Prepare model
+model = get_model(provider, model_name)
+
+# Choose method
+method_map = {
+    "FullContext": FullContext(model=model),
+    "SlidingWindow": SlidingWindow(model=model, window_size=window_size, num_windows=top_k),
+    "RAG-BM25": RAGBM25(model=model, top_k=top_k),
+    "Map-Reduce": MapReduce(model=model, chunk_size=window_size, top_k=top_k),
+    "Re-Ranking": ReRanking(model=model, top_k=top_k),
+    "Query-Summarization": QuerySummarization(model=model, top_k=top_k),
+    "Hybrid-RAG": HybridRAG(model=model, top_k=top_k)
+}
+method = method_map[method_name]
+
+if run_btn:
+    random.seed(seed)
+    with st.spinner("Generating dataset..."):
+        ds = make_dataset(n_docs=n_docs, context_tokens=context_len, positions=positions)
+    st.success(f"Generated {len(ds)} synthetic items.")
+
+    with st.spinner("Running evaluation... (low compute)"):
+        results = run_experiment(dataset=ds, method=method)
+
+    st.subheader("Results")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.pyplot(plot_accuracy_by_position(results))
+    with col2:
+        st.pyplot(plot_accuracy_by_context(results))
+
+    st.download_button("Download raw results (JSON)", data=results.to_json(orient="records"), file_name="results.json")
+
+st.markdown("---")
+st.markdown("**Tips:** Use `dummy-local` to test without calling an external LLM. When ready, switch to `vertex-gemini` and deploy to Cloud Run.")
+
+
+================================================
+FILE: Dockerfile
+================================================
+# Lightweight Python image
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# system deps for matplotlib backend and general utilities
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libglib2.0-0 \
+    libxrender1 \
+    libxext6 \
+    libsm6 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+
+# copy app
+COPY . .
+
+ENV PORT=8080
+EXPOSE 8080
+
+# Run streamlit
+CMD ["streamlit", "run", "app.py", "--server.port=8080", "--server.address=0.0.0.0", "--server.headless=true"]
+
+
+
+================================================
+FILE: requirements.txt
+================================================
+streamlit==1.37.1
+rank-bm25==0.2.2
+matplotlib==3.9.0
+pandas==2.2.2
+plotly==5.23.0
+# optional / only if using those providers:
+
+
+
+================================================
+FILE: .env.example
+================================================
+# For Vertex
+GCP_PROJECT=your-gcp-project-id
+GCP_LOCATION=us-central1
+
+# For OpenAI
+OPENAI_API_KEY=sk-...
+
+# Streamlit settings (optional)
+STREAMLIT_SERVER_HEADLESS=true
+
+
+
+================================================
+FILE: core/evaluation.py
+================================================
+[Empty file]
+
+
+================================================
+FILE: core/generator.py
+================================================
+import random
+import textwrap
+from typing import List, Dict
+
+SEED_SENTENCES = [
+    "Quantum cats dance on probabilistic pianos.",
+    "The API gateway logs were rotated at midnight.",
+    "A gentle breeze carried the scent of pine.",
+    "Embeddings improve retrieval when tuned for domain.",
+    "The quick brown fox jumps over the lazy dog.",
+    "Serverless functions scaled during the influx of traffic.",
+]
+
+def _filler(n: int) -> str:
+    # n ~ number of tokens (approx). We'll approximate by words.
+    pool = SEED_SENTENCES
+    words = []
+    for _ in range(max(1, n // 6)):
+        words.extend(random.choice(pool).split())
+    # trim to n words max
+    return " ".join(words)[: max(1, n * 4)]  # crude char-length safety
+
+def make_item(context_tokens: int, position: str) -> Dict:
+    """
+    Create a synthetic doc where an 'ANSWER-####' token sits at start/middle/end.
+    context_tokens is approximate token count (used for filler sizing).
+    """
+    answer = f"ANSWER-{random.randint(1000,9999)}"
+    # Build parts to put answer at requested position
+    total_words = max(200, context_tokens)  # coarse
+    third = total_words // 3
+
+    if position == "start":
+        parts = [answer, _filler(third), _filler(third)]
+    elif position == "end":
+        parts = [_filler(third), _filler(third), answer]
+    else:  # middle
+        parts = [_filler(third), answer, _filler(third)]
+
+    doc = " ".join(parts)
+    # make pretty paragraph-wrapped text
+    doc = textwrap.fill(doc, width=120)
+    question = "What is the hidden code? Respond with the exact code."
+    return {
+        "doc": doc,
+        "question": question,
+        "gold": answer,
+        "position": position,
+        "context_tokens": context_tokens,
+    }
+
+def make_dataset(n_docs: int, context_tokens: int, positions: List[str]):
+    ds = [make_item(context_tokens=context_tokens, position=random.choice(positions)) for _ in range(n_docs)]
+    return ds
+
+
+
+================================================
+FILE: core/models.py
+================================================
+[Empty file]
+
+
+================================================
+FILE: core/methods/full_context.py
+================================================
+[Empty file]
+
+
+================================================
+FILE: core/methods/hybrid_rag.py
+================================================
+from rank_bm25 import BM25Okapi
+
+class HybridRAG:
+    name = "Hybrid-RAG"
+    def __init__(self, model, top_k: int = 3):
+        self.model = model
+        self.top_k = top_k
+    def answer(self, question: str, document: str) -> str:
+        # BM25 step
+        chunks = document.split(". ")
+        tokenized = [c.split() for c in chunks]
+        bm25 = BM25Okapi(tokenized)
+        scores = bm25.get_scores(question.split())
+        top_chunks = [chunks[i] for i in sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:self.top_k]]
+        # Summarize retrieved chunks
+        summarized = []
+        for ch in top_chunks:
+            prompt = f"Summarize context for answering: '{question}'\n\n{ch}"
+            summarized.append(self.model.ask(question, prompt))
+        context = "\n".join(summarized)
+        return self.model.ask(question, context)
+
+
+================================================
+FILE: core/methods/map_reduce.py
+================================================
+[Empty file]
+
+
+================================================
+FILE: core/methods/query_summarization.py
+================================================
+class QuerySummarization:
+    name = "Query-Summarization"
+    def __init__(self, model, top_k: int = 3):
+        self.model = model
+        self.top_k = top_k
+    def answer(self, question: str, document: str) -> str:
+        chunks = [document[i:i+800] for i in range(0, len(document), 800)]
+        summaries = []
+        for ch in chunks:
+            prompt = f"Summarize this chunk focusing only on parts relevant to: '{question}'\n\n{ch}"
+            summaries.append(self.model.ask(question, prompt))
+        context = "\n".join(summaries[:self.top_k])
+        return self.model.ask(question, context)
+
+
+================================================
+FILE: core/methods/rag_bm25.py
+================================================
+[Empty file]
+
+
+================================================
+FILE: core/methods/re_ranking.py
+================================================
+from rank_bm25 import BM25Okapi
+
+class ReRanking:
+    name = "Re-Ranking"
+    def __init__(self, model, top_k: int = 3):
+        self.model = model
+        self.top_k = top_k
+    def answer(self, question: str, document: str) -> str:
+        # BM25 retrieve
+        chunks = document.split(". ")
+        tokenized = [c.split() for c in chunks]
+        bm25 = BM25Okapi(tokenized)
+        scores = bm25.get_scores(question.split())
+        ranked = sorted(enumerate(scores), key=lambda x: x[1], reverse=True)
+        top_chunks = [chunks[i] for i, _ in ranked[:self.top_k]]
+        # Ask model on concatenated top chunks
+        context = "\n".join(top_chunks)
+        return self.model.ask(question, context)
+
+
+================================================
+FILE: core/methods/sliding_window.py
+================================================
+[Empty file]
+
+
+================================================
+FILE: data/sample_corpus.txt
+================================================
+[Empty file]
+
