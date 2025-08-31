@@ -103,6 +103,36 @@ class GeminiAPIModel:
             return f"[Gemini API error: {e}]"
 
 
+
+def list_gemini_models():
+    """Return a list of available Gemini/GenAI models that support generateContent.
+    """
+    try:
+        load_dotenv()
+
+        api_key = os.getenv("GOOGLE_API_KEY")
+        if not api_key:
+            return ["API key not set (set GOOGLE_API_KEY in your .env file)"]
+
+        genai.configure(api_key=api_key)
+
+        models = []
+        print("Fetching model list. This may take a moment...")
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods:
+                models.append(m.name)
+
+        if not models:
+            return ["No models found that support generateContent"]
+
+        return models
+
+    except ImportError:
+        return [
+            "google-generativeai or python-dotenv not installed. Run: pip install -q -U google-generativeai python-dotenv"]
+    except Exception as e:
+        return [f"Gemini API error: {e}"]
+
 def get_model(provider: str, model_name: str = None):
     provider = (provider or "dummy-local").lower()
     if provider == "gemini-api":
