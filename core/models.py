@@ -30,42 +30,30 @@ class OllamaModel:
         except Exception as e:
             return f"[Ollama error: {e}]"
 
-def _init_vertex():
-    # lazy import
-    try:
-        from google.cloud import aiplatform
-        return aiplatform
-    except Exception as e:
-        raise RuntimeError("Vertex SDK not installed or not available.") from e
 
-class VertexGemini:
-    def __init__(self, model_name: str = "gemini-1.5-flash"):
-        self.model_name = model_name or "gemini-1.5-flash"
+class GeminiAPIModel:
+    def __init__(self, model_name: str = "gemini-1.5-pro"):
+        self.model_name = model_name or "gemini-1.5-pro"
+        try:
+            import google.generativeai as genai
+            self._client = genai
+            self._client.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+        except Exception as e:
+            raise RuntimeError("google-generativeai package not installed or GOOGLE_API_KEY missing.") from e
+
     def ask(self, question: str, context: str) -> str:
-        # Note: this is a simple wrapper. Users must provide proper project & auth.
-        # Keep prompt short and deterministic (temperature 0) when using in evaluation.
         try:
-            from vertexai.language_models import TextGenerationModel
-        except Exception:
-            # fallback older import
-            from vertexai.generative_models import GenerativeModel as GM
-            gm = GM(self.model_name)
-            prompt = f"Context:\n{context}\n\nQuestion: {question}\nAnswer with the exact code if present."
-            resp = gm.generate([prompt])
-            return resp.text or ""
-        model = TextGenerationModel.from_pretrained(self.model_name)
-        prompt = f"Context:\n{context}\n\nQuestion: {question}\nAnswer with the exact code if present."
-        out = model.predict(prompt, max_output_tokens=256, temperature=0)
-        return getattr(out, "text", str(out)) or ""
+            model = self._client.GenerativeModel(self.model_name)
+            prompt = f"Context:\n{context}\n\nQuestion: {question}\nAnswer with only the exact code if present."
 
-class OpenAIModel:
-    def __init__(self, model_name: str = "gpt-4o-mini"):
-        self.model_name = model_name or "gpt-4o-mini"
-        # require OPENAI_API_KEY in env
-        try:
-            import openai
-            openai.api_key = os.getenv("OPENAI_API_KEY")
-            self._client = openai
+            response = model.generate_content(
+                prompt,
+                generation_config=self._client.types.GenerationConfig(
+                    temperature=0.0,
+                    max_output_tokens=256,
+                ),
+            )
+            return response.text.strip() or ""
         except Exception as e:
             raise RuntimeError("openai package not installed or OPENAI_API_KEY missing.") from e
 
