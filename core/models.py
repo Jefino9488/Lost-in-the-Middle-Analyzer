@@ -1,5 +1,5 @@
 import os
-from typing import Optional
+
 
 class DummyModel:
     """Fast no-API model that extracts ANSWER-#### tokens from context for dev."""
