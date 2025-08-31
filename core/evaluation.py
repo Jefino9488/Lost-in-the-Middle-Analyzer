@@ -2,6 +2,8 @@ from typing import List, Dict
 import time
 import pandas as pd
 import matplotlib.pyplot as plt
+from sklearn.metrics import f1_score, precision_score, recall_score
+from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
 
 def run_experiment(dataset: List[Dict], method) -> pd.DataFrame:
     """Run an experiment on a dataset with a given method."""
@@ -15,9 +17,28 @@ def run_experiment(dataset: List[Dict], method) -> pd.DataFrame:
         if not doc:
             pred = "[ERROR: empty doc]"
             correct = False
+            f1, precision, recall, bleu = 0, 0, 0, 0
         else:
             pred = method.answer(question=question, document=doc) or ""
             correct = answer.strip().lower() in pred.strip().lower()
+
+            # Prepare for more complex metrics
+            pred_tokens = pred.strip().lower().split()
+            answer_tokens = answer.strip().lower().split()
+
+            # F1, Precision, Recall
+            # This is a simplified calculation for our specific use case (ANSWER-####).
+            # It treats the problem as a binary classification: is the correct token present?
+            # For more complex answers, you would need a more robust token-based comparison.
+            correct_token_found = int(bool(correct))
+            f1 = f1_score([1], [correct_token_found], average='binary', zero_division=0)
+            precision = precision_score([1], [correct_token_found], average='binary', zero_division=0)
+            recall = recall_score([1], [correct_token_found], average='binary', zero_division=0)
+
+            # BLEU Score
+            # Use a smoothing function for short sentences to avoid a zero score.
+            chencherry = SmoothingFunction()
+            bleu = sentence_bleu([answer_tokens], pred_tokens, smoothing_function=chencherry.method1)
 
         rows.append({
             "i": i,
@@ -26,6 +47,10 @@ def run_experiment(dataset: List[Dict], method) -> pd.DataFrame:
             "answer": answer,
             "pred": pred,
             "correct": int(bool(correct)),
+            "f1": f1,
+            "precision": precision,
+            "recall": recall,
+            "bleu": bleu,
             "method": getattr(method, "name", method.__class__.__name__),
         })
     dur = time.time() - start
@@ -75,7 +100,7 @@ def plot_accuracy_by_context(df: pd.DataFrame):
     return fig
 
 def run_single(item, method):
-    """Evaluate a single dataset item with a method."""
+    """Evaluate a single dataset item with a method, returning more metrics."""
     question = item["question"]
     doc = item.get("document") or item.get("doc")
     answer = item["answer"]
@@ -86,6 +111,10 @@ def run_single(item, method):
             "answer": answer,
             "pred": "[ERROR: empty doc]",
             "correct": 0,
+            "f1": 0,
+            "precision": 0,
+            "recall": 0,
+            "bleu": 0,
             "position": item.get("position"),
             "context_tokens": 0,
         }
@@ -93,11 +122,29 @@ def run_single(item, method):
     pred = method.answer(question, doc) or ""
     correct = answer.strip().lower() in pred.strip().lower()
 
+    # Prepare for more complex metrics
+    pred_tokens = pred.strip().lower().split()
+    answer_tokens = answer.strip().lower().split()
+
+    # F1, Precision, Recall
+    correct_token_found = int(bool(correct))
+    f1 = f1_score([1], [correct_token_found], average='binary', zero_division=0)
+    precision = precision_score([1], [correct_token_found], average='binary', zero_division=0)
+    recall = recall_score([1], [correct_token_found], average='binary', zero_division=0)
+
+    # BLEU Score
+    chencherry = SmoothingFunction()
+    bleu = sentence_bleu([answer_tokens], pred_tokens, smoothing_function=chencherry.method1)
+
     return {
         "question": question,
         "answer": answer,
         "pred": pred,
         "correct": int(correct),
+        "f1": f1,
+        "precision": precision,
+        "recall": recall,
+        "bleu": bleu,
         "position": item.get("position"),
         "context_tokens": item.get("context_tokens", len(doc.split())),
     }
