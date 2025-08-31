@@ -1,20 +1,10 @@
 import os
 from typing import Optional
 
-
-def ask(question: str, context: str) -> str:
-    import re
-    m = re.search(r"ANSWER-\d{4}", context)
-    if m:
-        return m.group(0)
-    # sometimes the prompt was the question + chunk; try to find in prompt too
-    m2 = re.search(r"ANSWER-\d{4}", question)
-    return m2.group(0) if m2 else "I couldn't find the code."
-
-
 class DummyModel:
     """Fast no-API model that extracts ANSWER-#### tokens from context for dev."""
-    def ask(self, question: str, context: str) -> str:
+    @staticmethod
+    def ask(question: str, context: str) -> str:
         import re
         m = re.search(r"ANSWER-\d{4}", context)
         if m:
