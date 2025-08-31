@@ -55,3 +55,31 @@ def plot_accuracy_by_context(df: pd.DataFrame):
     ax.set_xlabel("Approx. tokens")
     plt.tight_layout()
     return fig
+
+def run_single(item, method):
+    """Evaluate a single dataset item with a method."""
+    question = item["question"]
+    doc = item.get("document") or item.get("doc")
+    answer = item["answer"]
+
+    if not doc:
+        return {
+            "question": question,
+            "answer": answer,
+            "pred": "[ERROR: empty doc]",
+            "correct": 0,
+            "position": item.get("position"),
+            "context_tokens": 0,
+        }
+
+    pred = method.answer(question, doc) or ""
+    correct = answer.strip().lower() in pred.strip().lower()
+
+    return {
+        "question": question,
+        "answer": answer,
+        "pred": pred,
+        "correct": int(correct),
+        "position": item.get("position"),
+        "context_tokens": item.get("context_tokens", len(doc.split())),
+    }

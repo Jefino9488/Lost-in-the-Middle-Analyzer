@@ -1,3 +1,4 @@
+import pandas as pd
 import streamlit as st
 import random
 from core.generator import make_dataset
@@ -10,6 +11,7 @@ from core.methods.map_reduce import MapReduce
 from core.methods.re_ranking import ReRanking
 from core.methods.query_summarization import QuerySummarization
 from core.methods.hybrid_rag import HybridRAG
+from core.evaluation import run_single
 
 st.set_page_config(page_title="Lost-in-the-Middle Analyzer", page_icon="📏", layout="wide")
 st.title("📏 Lost-in-the-Middle Analyzer")
@@ -60,8 +62,17 @@ if run_btn:
         ds = make_dataset(n_docs=n_docs, context_tokens=context_len, positions=positions)
     st.success(f"Generated {len(ds)} synthetic items.")
 
-    with st.spinner("Running evaluation... (low compute)"):
-        results = run_experiment(dataset=ds, method=method)
+    st.subheader("Running evaluation... (low compute)")
+    progress = st.progress(0, text="Starting...")
+    results_list = []
+
+    for i, item in enumerate(ds):
+        answer = run_single(item, method)  # run experiment on a single doc
+        results_list.append(answer)
+
+        progress.progress((i + 1) / len(ds), text=f"Processed {i + 1}/{len(ds)} docs")
+
+    results = pd.DataFrame(results_list)
 
     st.subheader("Results")
     col1, col2 = st.columns(2)
