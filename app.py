@@ -18,7 +18,7 @@ st.title("📏 Lost-in-the-Middle Analyzer")
 
 with st.sidebar:
     st.header("Model & Method")
-    provider = st.selectbox("LLM Provider", ["dummy-local", "vertex-gemini", "openai"], index=0)
+    provider = st.selectbox("LLM Provider", ["dummy-local", "ollama", "vertex-gemini", "openai"], index=0)
     model_name = st.text_input("Model name (provider-specific)", value="dummy-echo")
 
     method_name = st.selectbox("Method", [

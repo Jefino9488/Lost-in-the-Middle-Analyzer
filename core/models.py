@@ -12,6 +12,24 @@ class DummyModel:
         m2 = re.search(r"ANSWER-\d{4}", question)
         return m2.group(0) if m2 else "I couldn't find the code."
 
+class OllamaModel:
+    def __init__(self, model_name: str = "tinyllama:latest"):
+        self.model_name = model_name
+
+    def ask(self, question: str, context: str) -> str:
+        prompt = f"Context:\n{context}\n\nQuestion: {question}\nAnswer concisely."
+        try:
+            import subprocess
+            result = subprocess.run(
+                ["ollama", "run", self.model_name],
+                input=prompt.encode("utf-8"),
+                capture_output=True,
+                check=True,
+            )
+            return result.stdout.decode("utf-8").strip()
+        except Exception as e:
+            return f"[Ollama error: {e}]"
+
 def _init_vertex():
     # lazy import
     try:
@@ -62,11 +80,12 @@ class OpenAIModel:
         )
         return resp.choices[0].message.content.strip()
 
-def get_model(provider: str, model_name: Optional[str] = None):
+def get_model(provider: str, model_name: str = None):
     provider = (provider or "dummy-local").lower()
     if provider == "vertex-gemini":
         return VertexGemini(model_name or "gemini-1.5-flash")
     if provider == "openai":
         return OpenAIModel(model_name or "gpt-4o-mini")
-    # default
+    if provider == "ollama":
+        return OllamaModel(model_name or "qwen2:0.5b")
     return DummyModel()
