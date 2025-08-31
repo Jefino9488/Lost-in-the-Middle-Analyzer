@@ -1,3 +1,8 @@
+import google.generativeai as genai
+import os
+from dotenv import load_dotenv
+
+
 class DummyModel:
     """Fast no-API model that extracts ANSWER-#### tokens from context for dev."""
     @staticmethod
