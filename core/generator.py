@@ -42,9 +42,9 @@ def make_item(context_tokens: int, position: str) -> Dict:
     doc = textwrap.fill(doc, width=120)
     question = "What is the hidden code? Respond with the exact code."
     return {
-        "doc": doc,
+        "document": doc,
         "question": question,
-        "gold": answer,
+        "answer": answer,
         "position": position,
         "context_tokens": context_tokens,
     }

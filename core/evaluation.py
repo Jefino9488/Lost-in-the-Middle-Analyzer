@@ -4,17 +4,26 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 def run_experiment(dataset: List[Dict], method) -> pd.DataFrame:
+    """Run an experiment on a dataset with a given method."""
     rows = []
     start = time.time()
     for i, item in enumerate(dataset):
-        pred = method.answer(question=item["question"], document=item["doc"]) or ""
-        # naive exact-match check; gold designed to be unique
-        correct = str(item["gold"]).strip() in pred
+        question = item["question"]
+        doc = item.get("document") or item.get("doc")  # support both keys
+        answer = item["answer"]
+
+        if not doc:
+            pred = "[ERROR: empty doc]"
+            correct = False
+        else:
+            pred = method.answer(question=question, document=doc) or ""
+            correct = answer.strip().lower() in pred.strip().lower()
+
         rows.append({
             "i": i,
-            "position": item["position"],
-            "context_tokens": item["context_tokens"],
-            "gold": item["gold"],
+            "position": item.get("position"),
+            "context_tokens": item.get("context_tokens", len(doc.split()) if doc else 0),
+            "answer": answer,
             "pred": pred,
             "correct": int(bool(correct)),
             "method": getattr(method, "name", method.__class__.__name__),
@@ -25,6 +34,7 @@ def run_experiment(dataset: List[Dict], method) -> pd.DataFrame:
     return df
 
 def plot_accuracy_by_position(df: pd.DataFrame):
+    """Bar chart: accuracy grouped by answer position (start/middle/end)."""
     if df.empty:
         fig, ax = plt.subplots()
         ax.text(0.5, 0.5, "No data", ha="center")
@@ -42,12 +52,20 @@ def plot_accuracy_by_position(df: pd.DataFrame):
     return fig
 
 def plot_accuracy_by_context(df: pd.DataFrame):
+    """Line chart: accuracy as a function of context length."""
     if df.empty:
         fig, ax = plt.subplots()
         ax.text(0.5, 0.5, "No data", ha="center")
         return fig
-    acc = df.groupby("context_tokens")["correct"].mean().reset_index().sort_values("context_tokens")
-    fig, ax = plt.subplots(figsize=(6,4))
+
+    acc = (
+        df.groupby("context_tokens")["correct"]
+        .mean()
+        .reset_index()
+        .sort_values("context_tokens")
+    )
+
+    fig, ax = plt.subplots(figsize=(6, 4))
     ax.plot(acc["context_tokens"], acc["correct"], marker='o')
     ax.set_ylim(0,1)
     ax.set_title("Accuracy vs. context length")
