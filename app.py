@@ -1,18 +1,21 @@
+import random
+
 import pandas as pd
 import streamlit as st
-import random
 from dotenv import load_dotenv
-from core.generator import make_dataset
-from core.evaluation import plot_accuracy_by_position, plot_accuracy_by_context, run_single
-from core.models import get_model, list_ollama_models, list_gemini_models, list_openrouter_models
-from core.methods.full_context import FullContext
-from core.methods.sliding_window import SlidingWindow
-from core.methods.rag_bm25 import RAGBM25
-from core.methods.map_reduce import MapReduce
-from core.methods.re_ranking import ReRanking
-from core.methods.query_summarization import QuerySummarization
-from core.methods.hybrid_rag import HybridRAG
+
+from core.evaluation import plot_accuracy_by_position, plot_accuracy_by_context
 from core.evaluation import run_single
+from core.generator import make_dataset
+from core.methods.full_context import FullContext
+from core.methods.hybrid_rag import HybridRAG
+from core.methods.map_reduce import MapReduce
+from core.methods.query_summarization import QuerySummarization
+from core.methods.rag_bm25 import RAGBM25
+from core.methods.re_ranking import ReRanking
+from core.methods.sliding_window import SlidingWindow
+from core.models import get_model, list_ollama_models, list_gemini_models, list_openrouter_models
+
 load_dotenv()
 st.set_page_config(page_title="Lost-in-the-Middle Analyzer", page_icon="📏", layout="wide")
 st.title("📏 Lost-in-the-Middle Analyzer")
