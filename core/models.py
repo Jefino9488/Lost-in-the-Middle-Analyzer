@@ -1,5 +1,6 @@
 import google.generativeai as genai
 import os
+import httpx
 from dotenv import load_dotenv
 
 
@@ -138,6 +139,95 @@ def list_gemini_models():
     except Exception as e:
         return [f"Gemini API error: {e}"]
 
+
+class OpenRouterModule:
+    """
+    A client for the OpenRouter chat completions API using httpx.
+    """
+
+    def __init__(self, model_name: str = "google/gemini-pro"):
+        # Load environment variables once during initialization
+        load_dotenv()
+
+        self.model_name = model_name
+        self._api_key = os.getenv("OPENROUTER_API_KEY")
+
+        if not self._api_key:
+            raise ValueError("OPENROUTER_API_KEY environment variable not set. "
+                             "Please check your .env file or environment variables.")
+
+        self._headers = {
+            "Authorization": f"Bearer {self._api_key}",
+            "Content-Type": "application/json",
+            "X-Title": "Lost-in-the-Middle Analyzer",
+        }
+
+        self._client = httpx.Client(base_url="https://openrouter.ai/api/v1")
+
+    def ask(self, question: str, context: str) -> str:
+        """
+        Sends a question and context to the specified model on OpenRouter and returns the response.
+        """
+        data = {
+            "model": self.model_name,
+            "messages": [
+                {"role": "user",
+                 "content": f"Context: {context}\n\nQuestion: {question}\nAnswer with only the exact code if present."}
+            ],
+            "temperature": 0.0,
+            "max_tokens": 256,
+        }
+
+        try:
+            response = self._client.post("/chat/completions", headers=self._headers, json=data)
+            response.raise_for_status()
+            return response.json()["choices"][0]["message"]["content"].strip()
+        except httpx.HTTPStatusError as e:
+            return f"[OpenRouter API HTTP error: {e.response.status_code} - {e.response.text}]"
+        except Exception as e:
+            return f"[OpenRouter API error: {e}]"
+def list_openrouter_models(free_only: bool = True) -> list[str]:
+    """
+    Returns a list of available models from OpenRouter.
+    """
+    import httpx
+    url = "https://openrouter.ai/api/v1/models"
+
+    try:
+        with httpx.Client() as client:
+            response = client.get(url)
+            response.raise_for_status()
+            models = response.json().get('data', [])
+
+            model_names = []
+            for m in models:
+                model_id = m.get('id', '')
+                if not model_id:
+                    continue
+
+                if free_only:
+                    pricing = m.get('pricing', {})
+                    input_cost = pricing.get('input')
+                    output_cost = pricing.get('output')
+
+                    if (model_id.endswith(':free') or
+                            (input_cost in ('0', 0, '0.0') and output_cost in ('0', 0, '0.0'))):
+                        model_names.append(model_id)
+                else:
+                    model_names.append(model_id)
+
+            if not model_names:
+                return [("No free models found." if free_only
+                         else "No models found or API structure changed.")]
+
+            return model_names
+
+    except httpx.HTTPStatusError as e:
+        return [f"[OpenRouter API HTTP error: {e.response.status_code} - {e.response.text}]"]
+    except Exception as e:
+        return [f"[OpenRouter API error: {e}]"]
+
+
 def get_model(provider: str, model_name: str = None):
     provider = (provider or "dummy-local").lower()
     if provider == "gemini-api":
@@ -146,4 +236,8 @@ def get_model(provider: str, model_name: str = None):
         return GeminiAPIModel(model_name or "gemini-2.0-flash")
     if provider == "ollama":
         return OllamaModel(model_name or "qwen2:0.5b")
+    if provider == "openrouter":
+        from dotenv import load_dotenv
+        load_dotenv()
+        return OpenRouterModule(model_name)
     return DummyModel()

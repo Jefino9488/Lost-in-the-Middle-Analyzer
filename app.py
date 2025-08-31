@@ -4,7 +4,7 @@ import random
 from dotenv import load_dotenv
 from core.generator import make_dataset
 from core.evaluation import plot_accuracy_by_position, plot_accuracy_by_context, run_single
-from core.models import get_model, list_ollama_models, list_gemini_models
+from core.models import get_model, list_ollama_models, list_gemini_models, list_openrouter_models
 from core.methods.full_context import FullContext
 from core.methods.sliding_window import SlidingWindow
 from core.methods.rag_bm25 import RAGBM25
@@ -19,13 +19,16 @@ st.title("📏 Lost-in-the-Middle Analyzer")
 
 with st.sidebar:
     st.header("Model & Method")
-    provider = st.selectbox("LLM Provider", ["dummy-local", "ollama", "gemini-api"], index=0)
-
+    provider = st.selectbox("LLM Provider", ["dummy-local", "ollama", "gemini-api", "openrouter"], index=0)
     if provider == "ollama":
         models = list_ollama_models()
         model_name = st.selectbox("Model name", models, index=0)
     elif provider == "gemini-api":
         models = list_gemini_models()
+        model_name = st.selectbox("Model name", models, index=0)
+    elif provider == "openrouter":
+        free_only = st.checkbox("Show only free models", value=True)
+        models = list_openrouter_models(free_only=free_only)
         model_name = st.selectbox("Model name", models, index=0)
     else:
         model_name = st.text_input("Model name (provider-specific)", value="dummy-echo")
@@ -71,7 +74,7 @@ if run_btn:
         ds = make_dataset(n_docs=n_docs, context_tokens=context_len, positions=positions)
     st.success(f"Generated {len(ds)} synthetic items.")
 
-    st.subheader("Running evaluation... (low compute)")
+    st.subheader("Running evaluation... This may take a while.")
     progress = st.progress(0, text="Starting...")
     results_list = []
 
