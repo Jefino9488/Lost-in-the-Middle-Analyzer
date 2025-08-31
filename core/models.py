@@ -62,7 +62,9 @@ class GeminiAPIModel:
 def get_model(provider: str, model_name: str = None):
     provider = (provider or "dummy-local").lower()
     if provider == "gemini-api":
-        return GeminiAPIModel(model_name or "gemini-1.5-pro")
+        from dotenv import load_dotenv
+        load_dotenv()
+        return GeminiAPIModel(model_name or "gemini-2.0-flash")
     if provider == "ollama":
         return OllamaModel(model_name or "qwen2:0.5b")
     return DummyModel()
