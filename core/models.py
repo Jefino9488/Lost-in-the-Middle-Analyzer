@@ -33,23 +33,41 @@ class OllamaModel:
 
 
 class GeminiAPIModel:
-    def __init__(self, model_name: str = "gemini-1.5-pro"):
-        self.model_name = model_name or "gemini-1.5-pro"
+    def __init__(self, model_name: str = "gemini-2.0-flash"):
+        """
+        Initializes the GeminiAPIModel with a specific model name.
+        """
+        import os
+        from google import genai
+        self.model_name = model_name or "gemini-2.0-flash"
         try:
-            import google.generativeai as genai
-            self._client = genai
-            self._client.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+            api_key = os.getenv("GOOGLE_API_KEY")
+            if not api_key:
+                raise ValueError("GOOGLE_API_KEY environment variable not set.")
+            self._client = genai.Client(api_key=api_key)
         except Exception as e:
-            raise RuntimeError("google-generativeai package not installed or GOOGLE_API_KEY missing.") from e
+            raise RuntimeError("google-genai package not installed or GOOGLE_API_KEY missing.") from e
 
     def ask(self, question: str, context: str) -> str:
+        """
+        Sends a request to the Gemini model and returns the response.
+        """
+        from google.genai import types
         try:
-            model = self._client.GenerativeModel(self.model_name)
-            prompt = f"Context:\n{context}\n\nQuestion: {question}\nAnswer with only the exact code if present."
+            prompt_content = [
+                types.Content(
+                    role='user',
+                    parts=[
+                        types.Part.from_text(text=f"Context:\n{context}\n\nQuestion: {question}"),
+                        types.Part.from_text(text="Answer with only the exact code if present.")
+                    ]
+                )
+            ]
 
-            response = model.generate_content(
-                prompt,
-                generation_config=self._client.types.GenerationConfig(
+            response = self._client.models.generate_content(
+                model=self.model_name,
+                contents=prompt_content,
+                config=types.GenerateContentConfig(
                     temperature=0.0,
                     max_output_tokens=256,
                 ),
