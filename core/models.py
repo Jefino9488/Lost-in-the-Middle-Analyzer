@@ -29,6 +29,35 @@ class OllamaModel:
             return f"[Ollama error: {e}]"
 
 
+def list_ollama_models():
+    """
+    Returns a list of available local models from Ollama by calling the CLI.
+    """
+    import subprocess
+    try:
+        result = subprocess.run(
+            ['ollama', 'list'],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+
+        output = result.stdout
+        lines = output.strip().split('\n')[1:]
+
+        if not lines:
+            return ["No models found via Ollama CLI."]
+        model_names = [line.split()[0] for line in lines]
+
+        return model_names
+
+    except FileNotFoundError:
+        return ["'ollama' command not found. Is Ollama installed and in your system's PATH?"]
+    except subprocess.CalledProcessError as e:
+        return [f"Ollama CLI error: {e.stderr.strip()}"]
+    except Exception as e:
+        return [f"An unexpected error occurred: {e}"]
+
 class GeminiAPIModel:
     def __init__(self, model_name: str = "gemini-2.0-flash"):
         """
