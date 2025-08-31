@@ -1,9 +1,10 @@
 import pandas as pd
 import streamlit as st
 import random
+from dotenv import load_dotenv
 from core.generator import make_dataset
-from core.evaluation import plot_accuracy_by_position, plot_accuracy_by_context
-from core.models import get_model
+from core.evaluation import plot_accuracy_by_position, plot_accuracy_by_context, run_single
+from core.models import get_model, list_ollama_models, list_gemini_models
 from core.methods.full_context import FullContext
 from core.methods.sliding_window import SlidingWindow
 from core.methods.rag_bm25 import RAGBM25
@@ -19,7 +20,15 @@ st.title("📏 Lost-in-the-Middle Analyzer")
 with st.sidebar:
     st.header("Model & Method")
     provider = st.selectbox("LLM Provider", ["dummy-local", "ollama", "gemini-api"], index=0)
-    model_name = st.text_input("Model name (provider-specific)", value="dummy-echo")
+
+    if provider == "ollama":
+        models = list_ollama_models()
+        model_name = st.selectbox("Model name", models, index=0)
+    elif provider == "gemini-api":
+        models = list_gemini_models()
+        model_name = st.selectbox("Model name", models, index=0)
+    else:
+        model_name = st.text_input("Model name (provider-specific)", value="dummy-echo")
 
     method_name = st.selectbox("Method", [
         "FullContext",
@@ -67,7 +76,7 @@ if run_btn:
     results_list = []
 
     for i, item in enumerate(ds):
-        answer = run_single(item, method)  # run experiment on a single doc
+        answer = run_single(item, method)
         results_list.append(answer)
 
         progress.progress((i + 1) / len(ds), text=f"Processed {i + 1}/{len(ds)} docs")
