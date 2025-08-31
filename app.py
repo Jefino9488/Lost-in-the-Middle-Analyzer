@@ -12,7 +12,7 @@ from core.methods.re_ranking import ReRanking
 from core.methods.query_summarization import QuerySummarization
 from core.methods.hybrid_rag import HybridRAG
 from core.evaluation import run_single
-
+load_dotenv()
 st.set_page_config(page_title="Lost-in-the-Middle Analyzer", page_icon="📏", layout="wide")
 st.title("📏 Lost-in-the-Middle Analyzer")
 
