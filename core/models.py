@@ -56,25 +56,13 @@ class GeminiAPIModel:
             )
             return response.text.strip() or ""
         except Exception as e:
-            raise RuntimeError("openai package not installed or OPENAI_API_KEY missing.") from e
+            return f"[Gemini API error: {e}]"
 
-    def ask(self, question: str, context: str) -> str:
-        prompt = f"Context:\n{context}\n\nQuestion: {question}\nAnswer with only the code if present."
-        # Using chat completion style for broad compatibility
-        resp = self._client.ChatCompletion.create(
-            model=self.model_name,
-            messages=[{"role":"user","content":prompt}],
-            temperature=0,
-            max_tokens=256,
-        )
-        return resp.choices[0].message.content.strip()
 
 def get_model(provider: str, model_name: str = None):
     provider = (provider or "dummy-local").lower()
-    if provider == "vertex-gemini":
-        return VertexGemini(model_name or "gemini-1.5-flash")
-    if provider == "openai":
-        return OpenAIModel(model_name or "gpt-4o-mini")
+    if provider == "gemini-api":
+        return GeminiAPIModel(model_name or "gemini-1.5-pro")
     if provider == "ollama":
         return OllamaModel(model_name or "qwen2:0.5b")
     return DummyModel()
