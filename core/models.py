@@ -3,18 +3,40 @@ import os
 import httpx
 from dotenv import load_dotenv
 
+from core.utils import approx_tokens_from_text, timed_call, estimate_cost_usd
+
 
 class DummyModel:
     """Fast no-API model that extracts ANSWER-#### tokens from context for dev."""
+    provider_key = "dummy-local"
     @staticmethod
-    def ask(question: str, context: str) -> str:
+    def _extract(context_and_question: str) -> str:
         import re
-        m = re.search(r"ANSWER-\d{4}", context)
+        m = re.search(r"ANSWER-\d{4}", context_and_question)
         if m:
             return m.group(0)
-        # sometimes the prompt was the question + chunk; try to find in prompt too
-        m2 = re.search(r"ANSWER-\d{4}", question)
+        m2 = re.search(r"ANSWER-\d{4}", context_and_question)
         return m2.group(0) if m2 else "I couldn't find the code."
+
+    def ask(self, question: str, context: str) -> str:
+        return self._extract(context + "\n" + question)
+
+    def ask_with_trace(self, question: str, context: str):
+        prompt = f"Context:\n{context}\n\nQuestion: {question}"
+        # timed call wrapper for consistency
+        (res), latency_ms = timed_call(self._extract, prompt)
+        input_tokens = approx_tokens_from_text(prompt, model=None)
+        output_tokens = approx_tokens_from_text(res, model=None)
+        cost = estimate_cost_usd(self.provider_key, input_tokens, output_tokens)
+        return {
+            "text": res,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "latency_ms": latency_ms,
+            "cost_usd": cost,
+            "provider": self.provider_key,
+            "model": "dummy-echo"
+        }
 
 class OllamaModel:
     def __init__(self, model_name: str = "tinyllama:latest"):
@@ -65,37 +87,31 @@ def list_ollama_models():
         return [f"An unexpected error occurred: {e}"]
 
 class GeminiAPIModel:
+    provider_key = "gemini"
     def __init__(self, model_name: str = "gemini-2.0-flash"):
-        """
-        Initializes the GeminiAPIModel with a specific model name.
-        """
         import os
         from google import genai
         self.model_name = model_name or "gemini-2.0-flash"
-        try:
-            api_key = os.getenv("GOOGLE_API_KEY")
-            if not api_key:
-                raise ValueError("GOOGLE_API_KEY environment variable not set.")
-            self._client = genai.Client(api_key=api_key)
-        except Exception as e:
-            raise RuntimeError("google-genai package not installed or GOOGLE_API_KEY missing.") from e
+        api_key = os.getenv("GOOGLE_API_KEY")
+        if not api_key:
+            raise RuntimeError("GOOGLE_API_KEY not set.")
+        self._client = genai.Client(api_key=api_key)
 
     def ask(self, question: str, context: str) -> str:
-        """
-        Sends a request to the Gemini model and returns the response.
-        """
+        return self.ask_with_trace(question, context)["text"]
+
+    def ask_with_trace(self, question: str, context: str):
         from google.genai import types
-        try:
+        prompt_text = f"Context:\n{context}\n\nQuestion: {question}\nAnswer with only the exact code if present."
+        def _call():
             prompt_content = [
                 types.Content(
                     role='user',
                     parts=[
-                        types.Part.from_text(text=f"Context:\n{context}\n\nQuestion: {question}"),
-                        types.Part.from_text(text="Answer with only the exact code if present.")
+                        types.Part.from_text(text=prompt_text)
                     ]
                 )
             ]
-
             response = self._client.models.generate_content(
                 model=self.model_name,
                 contents=prompt_content,
@@ -104,9 +120,23 @@ class GeminiAPIModel:
                     max_output_tokens=256,
                 ),
             )
-            return response.text.strip() or ""
-        except Exception as e:
-            return f"[Gemini API error: {e}]"
+            # response.text gives combined text
+            # Some google-genai versions use response.candidates[0].content[].texts
+            return response.text if hasattr(response, "text") else str(response)
+
+        res, latency_ms = timed_call(_call)
+        input_tokens = approx_tokens_from_text(prompt_text, model=self.model_name)
+        output_tokens = approx_tokens_from_text(res, model=self.model_name)
+        cost = estimate_cost_usd(self.provider_key, input_tokens, output_tokens)
+        return {
+            "text": res.strip() if isinstance(res, str) else str(res),
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "latency_ms": latency_ms,
+            "cost_usd": cost,
+            "provider": self.provider_key,
+            "model": self.model_name
+        }
 
 
 
@@ -141,33 +171,24 @@ def list_gemini_models():
 
 
 class OpenRouterModule:
-    """
-    A client for the OpenRouter chat completions API using httpx.
-    """
-
+    provider_key = "openrouter"
     def __init__(self, model_name: str = "google/gemini-pro"):
-        # Load environment variables once during initialization
         load_dotenv()
-
         self.model_name = model_name
         self._api_key = os.getenv("OPENROUTER_API_KEY")
-
         if not self._api_key:
-            raise ValueError("OPENROUTER_API_KEY environment variable not set. "
-                             "Please check your .env file or environment variables.")
-
+            raise ValueError("OPENROUTER_API_KEY environment variable not set.")
         self._headers = {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
             "X-Title": "Lost-in-the-Middle Analyzer",
         }
-
         self._client = httpx.Client(base_url="https://openrouter.ai/api/v1")
 
     def ask(self, question: str, context: str) -> str:
-        """
-        Sends a question and context to the specified model on OpenRouter and returns the response.
-        """
+        return self.ask_with_trace(question, context)["text"]
+
+    def ask_with_trace(self, question: str, context: str):
         data = {
             "model": self.model_name,
             "messages": [
@@ -177,15 +198,29 @@ class OpenRouterModule:
             "temperature": 0.0,
             "max_tokens": 256,
         }
-
-        try:
+        def _call():
             response = self._client.post("/chat/completions", headers=self._headers, json=data)
             response.raise_for_status()
-            return response.json()["choices"][0]["message"]["content"].strip()
-        except httpx.HTTPStatusError as e:
-            return f"[OpenRouter API HTTP error: {e.response.status_code} - {e.response.text}]"
+            body = response.json()
+            content = body["choices"][0]["message"]["content"]
+            return content
+        try:
+            res, latency_ms = timed_call(_call)
         except Exception as e:
-            return f"[OpenRouter API error: {e}]"
+            res = f"[OpenRouter API error: {e}]"
+            latency_ms = 0
+        input_tokens = approx_tokens_from_text(data["messages"][0]["content"], model=self.model_name)
+        output_tokens = approx_tokens_from_text(res, model=self.model_name)
+        cost = estimate_cost_usd(self.provider_key, input_tokens, output_tokens)
+        return {
+            "text": res.strip() if isinstance(res, str) else str(res),
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "latency_ms": latency_ms,
+            "cost_usd": cost,
+            "provider": self.provider_key,
+            "model": self.model_name
+        }
 def list_openrouter_models(free_only: bool = True) -> list[str]:
     """
     Returns a list of available models from OpenRouter.

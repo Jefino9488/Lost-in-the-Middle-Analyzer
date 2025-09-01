@@ -1,0 +1,93 @@
+# core/utils.py
+import re
+import time
+import math
+
+try:
+    import tiktoken  # optional: better token counting if available
+    TIKTOKEN_AVAILABLE = True
+except Exception:
+    TIKTOKEN_AVAILABLE = False
+
+# --- Token counting ---------------------------------------------------------
+def approx_tokens_from_text(text: str, model: str = "default"):
+    """
+    Return an approximate token count. Uses tiktoken if installed; otherwise falls
+    back to a crude word-based estimate (1 token ~ 0.75 words -> approx).
+    """
+    if not text:
+        return 0
+    if TIKTOKEN_AVAILABLE:
+        try:
+            enc = tiktoken.encoding_for_model(model) if model else tiktoken.get_encoding("cl100k_base")
+            return len(enc.encode(text))
+        except Exception:
+            # fallback
+            pass
+
+    # fallback heuristic: average 4 characters/token ~ 1 token per ~4 chars
+    return max(1, int(len(text) / 4))
+
+# --- Normalization / EM -----------------------------------------------------
+def normalize_for_em(s: str) -> str:
+    """Normalize string: strip, lower, collapse whitespace."""
+    if s is None:
+        return ""
+    s = s.strip().lower()
+    # collapse whitespace
+    s = re.sub(r'\s+', ' ', s)
+    return s
+
+def strict_exact_match(pred: str, gold: str) -> bool:
+    """Strict EM using normalized strings and exact equality (not containment)."""
+    return normalize_for_em(pred) == normalize_for_em(gold)
+
+# --- edit distance ----------------------------------------------------------
+def edit_distance(a: str, b: str) -> int:
+    """Compute Levenshtein edit distance (classic DP)."""
+    if a is None: a = ""
+    if b is None: b = ""
+    n, m = len(a), len(b)
+    if n == 0:
+        return m
+    if m == 0:
+        return n
+    dp = [[0] * (m + 1) for _ in range(n + 1)]
+    for i in range(n + 1):
+        dp[i][0] = i
+    for j in range(m + 1):
+        dp[0][j] = j
+    for i in range(1, n + 1):
+        ai = a[i-1]
+        for j in range(1, m + 1):
+            cost = 0 if ai == b[j-1] else 1
+            dp[i][j] = min(
+                dp[i-1][j] + 1,     # deletion
+                dp[i][j-1] + 1,     # insertion
+                dp[i-1][j-1] + cost # substitution
+            )
+    return dp[n][m]
+
+# --- simple pricing tables (placeholders) -----------------------------------
+# NOTE: these are *approximate* placeholders. Replace with accurate per-provider pricing.
+PRICING = {
+    "gemini": {"input_per_1k_tokens_usd": 0.002, "output_per_1k_tokens_usd": 0.004},
+    "openrouter": {"input_per_1k_tokens_usd": 0.003, "output_per_1k_tokens_usd": 0.003},
+    "dummy-local": {"input_per_1k_tokens_usd": 0.0, "output_per_1k_tokens_usd": 0.0},
+    "claude-cli": {"input_per_1k_tokens_usd": 0.0, "output_per_1k_tokens_usd": 0.0},
+}
+
+def estimate_cost_usd(provider_key: str, input_tokens: int, output_tokens: int) -> float:
+    """Estimate cost in USD for a single call using PRICING table."""
+    p = PRICING.get(provider_key.lower(), PRICING["openrouter"])
+    in_cost = (input_tokens / 1000.0) * p["input_per_1k_tokens_usd"]
+    out_cost = (output_tokens / 1000.0) * p["output_per_1k_tokens_usd"]
+    return round(in_cost + out_cost, 8)
+
+# --- timing helper ----------------------------------------------------------
+def timed_call(fn, *args, **kwargs):
+    """Run fn(*args, **kwargs), return (result, latency_ms)."""
+    t0 = time.perf_counter()
+    res = fn(*args, **kwargs)
+    t1 = time.perf_counter()
+    return res, int((t1 - t0) * 1000)
