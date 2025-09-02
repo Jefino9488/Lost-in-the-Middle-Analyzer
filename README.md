@@ -104,6 +104,7 @@ OPENROUTER_API_KEY=your-openrouter-api-key
 
 ## Docker Deployment
 
+### Docker (single container)
 Build and run with Docker:
 
 ```bash
@@ -113,14 +114,37 @@ docker run -p 8080:8080 --env-file .env lost-middle-analyzer
 
 Access the app at `http://localhost:8080`.
 
-## Example Experiment
+### Docker Compose (app + Ollama)
+Bring up the Streamlit app and a local Ollama server with one command:
 
-* **Provider**: Gemini API
-* **Method**: RAG-BM25
-* **Dataset**: 100 documents, 3000 tokens each
-* **Positions**: start, middle, end
+```bash
+docker compose up --build
+```
 
-Results show accuracy drop when answers appear in the middle, highlighting the *lost-in-the-middle* effect.
+This starts:
+- app at http://localhost:8080
+- ollama at http://localhost:11434 (available to the app via OLLAMA_BASE_URL)
+
+To pull a model into Ollama inside the running container (first time only):
+
+```bash
+docker exec -it ollama ollama pull tinyllama:latest
+```
+
+Then, in the UI, select provider "ollama" and choose your pulled model.
+
+## Examples
+
+The app includes an "Examples" expander on the main page with one-click presets that prefill the sidebar. You can also replicate them manually:
+
+- Quick demo (fast)
+  - Provider: dummy-local; Method: FullContext; Docs: 10; Context: 1000; Positions: start/middle/end; top_k: 3; window_size: 800; seed: 42
+- Lost-in-the-middle stress
+  - Provider: dummy-local; Method: SlidingWindow; Docs: 60; Context: 6000; Positions: start/middle/end; top_k: 5; window_size: 1200; seed: 7
+- Map-Reduce large context
+  - Provider: dummy-local; Method: Map-Reduce; Docs: 40; Context: 9000; Positions: start/middle/end; top_k: 3; window_size: 1500; seed: 13
+
+These presets make it easy to observe the effect: accuracy often drops when answers appear in the middle, highlighting the lost-in-the-middle phenomenon.
 
 ## Contributing
 
