@@ -44,6 +44,22 @@ class OllamaModel:
 
     def ask(self, question: str, context: str) -> str:
         prompt = f"Context:\n{context}\n\nQuestion: {question}\nAnswer concisely."
+        base_url = os.getenv("OLLAMA_BASE_URL") or os.getenv("OLLAMA_HOST")
+        if base_url:
+            try:
+                url = base_url.rstrip("/") + "/api/generate"
+                payload = {
+                    "model": self.model_name,
+                    "prompt": prompt,
+                    "stream": False,
+                }
+                resp = httpx.post(url, json=payload, timeout=120)
+                resp.raise_for_status()
+                data = resp.json()
+                text = data.get("response") or data.get("text") or ""
+                return str(text).strip()
+            except Exception as e:
+                return f"[Ollama HTTP error: {e}]"
         try:
             import subprocess
             result = subprocess.run(
@@ -59,8 +75,28 @@ class OllamaModel:
 
 def list_ollama_models():
     """
-    Returns a list of available local models from Ollama by calling the CLI.
+    Returns a list of available local models from Ollama.
+    - If OLLAMA_BASE_URL/OLLAMA_HOST is set, query the HTTP API (preferred in Docker Compose).
+    - Otherwise, fall back to the local `ollama list` CLI.
     """
+    base_url = os.getenv("OLLAMA_BASE_URL") or os.getenv("OLLAMA_HOST")
+    if base_url:
+        try:
+            url = base_url.rstrip("/") + "/api/tags"
+            resp = httpx.get(url, timeout=10)
+            resp.raise_for_status()
+            data = resp.json() or {}
+            models = data.get("models") or data.get("items") or []
+            names = []
+            for m in models:
+                name = m.get("name") or m.get("model") or ""
+                if name:
+                    names.append(name)
+            return names or ["No models found via Ollama HTTP API."]
+        except Exception as e:
+            return [f"Ollama HTTP error: {e}"]
+
+    # CLI fallback
     import subprocess
     try:
         result = subprocess.run(
