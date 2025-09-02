@@ -218,7 +218,8 @@ if run_btn:
         "n_docs": n_docs,
         "context_len": context_len,
         "positions": positions,
-        "seed": seed
+        "seed": seed,
+        "show_cost_latency": bool(show_cost_latency),
     }
 
     random.seed(seed)
