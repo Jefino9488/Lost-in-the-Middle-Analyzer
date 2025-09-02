@@ -148,7 +148,7 @@ These presets make it easy to observe the effect: accuracy often drops when answ
 
 ## Contributing
 
-Contributions are welcome. Please fork the repository, make your changes, and submit a pull request. For feature requests or issues, open a ticket in the [GitHub issue tracker](https://github.com/your-org/lost-middle-analyzer/issues).
+We love your input! Please read [CONTRIBUTING.md](CONTRIBUTING.md) to get started. It explains how to report bugs, request features, and submit code. Use our GitHub issue templates for clear, actionable reports: [Bug Report] and [Feature Request] in the issue tracker.
 
 ## License
 
