@@ -2,6 +2,8 @@
 
 The **Lost-in-the-Middle Analyzer** is a lightweight benchmarking and visualization framework for analyzing long-context failures in large language models (LLMs). It provides synthetic datasets, evaluation metrics, and multiple retrieval/aggregation methods to study how models handle information distributed across large contexts.
 
+![Architecture Diagram](doc/architechture.png)
+
 ## Features
 
 * **Synthetic Dataset Generation**: Creates documents of configurable length with hidden answers at the start, middle, or end.
