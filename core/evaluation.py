@@ -6,7 +6,7 @@ import numpy as np
 import math
 
 from core.utils import (normalize_for_em, strict_exact_match, edit_distance,
-                        approx_tokens_from_text, estimate_cost_usd)
+                        approx_tokens_from_text, estimate_cost_usd, precision_recall_f1, bleu_score)
 
 # --- helpers ---------------------------------------------------------------
 def mean_confidence_interval(data, confidence=0.95):
@@ -108,6 +108,8 @@ def run_single(item: Dict, method, provider_key: str = "unknown", index: int = 0
     # strict EM and edit distance
     em = 1 if strict_exact_match(pred, gold) else 0
     ed = edit_distance(normalize_for_em(pred), normalize_for_em(gold))
+    prec, rec, f1 = precision_recall_f1(pred, gold)
+    bleu = bleu_score(pred, gold)
 
     # false positive: predicted a code-like token but gold is missing or empty
     import re
@@ -141,6 +143,11 @@ def run_single(item: Dict, method, provider_key: str = "unknown", index: int = 0
         "cost_usd": float(cost_usd),
         "provider": provider,
         "model": model_name,
+        "precision": prec,
+        "recall": rec,
+        "f1": f1,
+        "bleu": bleu,
+
     }
     return row
 
@@ -207,6 +214,10 @@ def aggregate_summary(df: pd.DataFrame, by = ["method","position"]):
             "mean_input_tokens": g["input_tokens"].mean(),
             "mean_output_tokens": g["output_tokens"].mean(),
             "false_positive_rate": g["false_positive"].mean(),
-            "decoy_confusion_rate": g["decoy_confusion"].mean()
+            "decoy_confusion_rate": g["decoy_confusion"].mean(),
+            "mean_precision": g["precision"].mean(),
+            "mean_recall": g["recall"].mean(),
+            "mean_f1": g["f1"].mean(),
+            "mean_bleu": g["bleu"].mean(),
         })
     return pd.DataFrame(groups)

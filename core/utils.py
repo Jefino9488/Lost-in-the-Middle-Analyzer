@@ -1,8 +1,6 @@
-# core/utils.py
 import re
 import time
-import math
-
+from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
 try:
     import tiktoken  # optional: better token counting if available
     TIKTOKEN_AVAILABLE = True
@@ -91,3 +89,29 @@ def timed_call(fn, *args, **kwargs):
     res = fn(*args, **kwargs)
     t1 = time.perf_counter()
     return res, int((t1 - t0) * 1000)
+
+
+def precision_recall_f1(pred: str, gold: str):
+    """
+    Compute token-level precision, recall, and F1 between prediction and gold.
+    """
+    if not pred or not gold:
+        return 0.0, 0.0, 0.0
+    pred_tokens = pred.strip().split()
+    gold_tokens = gold.strip().split()
+    pred_set, gold_set = set(pred_tokens), set(gold_tokens)
+
+    true_pos = len(pred_set & gold_set)
+    precision = true_pos / len(pred_set) if pred_set else 0.0
+    recall = true_pos / len(gold_set) if gold_set else 0.0
+    f1 = (2 * precision * recall) / (precision + recall) if (precision + recall) > 0 else 0.0
+    return precision, recall, f1
+
+def bleu_score(pred: str, gold: str):
+    """
+    Compute BLEU score between predicted and gold text.
+    """
+    if not pred or not gold:
+        return 0.0
+    smoothing = SmoothingFunction().method1
+    return sentence_bleu([gold.split()], pred.split(), smoothing_function=smoothing)
