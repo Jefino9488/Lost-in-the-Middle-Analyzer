@@ -169,10 +169,11 @@ def ensure_trace(
     Fills in missing token counts, cost, and latency.
     """
     # Token counts
+    model_hint = model or provider
     if input_tokens is None:
-        input_tokens = count_tokens(prompt, model)
+        input_tokens = count_tokens(prompt, model_hint)
     if output_tokens is None:
-        output_tokens = count_tokens(text, model)
+        output_tokens = count_tokens(text, model_hint)
 
     # Latency
     if latency_ms is None:
@@ -189,6 +190,6 @@ def ensure_trace(
         "latency_ms": int(latency_ms),
         "cost_usd": float(cost_usd),
         "provider": provider,
-        "model": model,
+        "model": model or provider,
     }
 

@@ -287,5 +287,5 @@ def get_model(provider: str, model_name: str = None):
     if provider == "openrouter":
         from dotenv import load_dotenv
         load_dotenv()
-        return OpenRouterModule(model_name)
+        return OpenRouterModule(model_name or "google/gemini-pro")
     return DummyModel()
