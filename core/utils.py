@@ -1,5 +1,7 @@
 import re
 import time
+import warnings
+
 from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
 try:
     import tiktoken  # optional: better token counting if available
@@ -8,10 +10,26 @@ except Exception:
     TIKTOKEN_AVAILABLE = False
 
 # --- Token counting ---------------------------------------------------------
-def approx_tokens_from_text(text: str, model: str = "default"):
+try:
+    import tiktoken
+    TIKTOKEN_AVAILABLE = True
+except Exception:
+    TIKTOKEN_AVAILABLE = False
+
+try:
+    from transformers import AutoTokenizer
+    TRANSFORMERS_AVAILABLE = True
+except Exception:
+    TRANSFORMERS_AVAILABLE = False
+
+
+def count_tokens(text: str, model: str = None) -> int:
     """
-    Return an approximate token count. Uses tiktoken if installed; otherwise falls
-    back to a crude word-based estimate (1 token ~ 0.75 words -> approx).
+    Return an estimated token count for given text and model.
+    Priority:
+    1. Use tiktoken if available and model supported.
+    2. Use Hugging Face tokenizer if available.
+    3. Fallback to character-length heuristic (~4 chars/token).
     """
     if not text:
         return 0
@@ -20,11 +38,30 @@ def approx_tokens_from_text(text: str, model: str = "default"):
             enc = tiktoken.encoding_for_model(model) if model else tiktoken.get_encoding("cl100k_base")
             return len(enc.encode(text))
         except Exception:
-            # fallback
             pass
 
-    # fallback heuristic: average 4 characters/token ~ 1 token per ~4 chars
+    # --- Hugging Face path ---
+    if TRANSFORMERS_AVAILABLE and model:
+        try:
+            # Try loading a tokenizer for the model family
+            if "gemini" in model.lower():
+                tok = AutoTokenizer.from_pretrained("google/gemma-2b")
+            elif "llama" in model.lower():
+                tok = AutoTokenizer.from_pretrained("meta-llama/Llama-2-7b-hf")
+            else:
+                tok = AutoTokenizer.from_pretrained("bert-base-uncased")
+            return len(tok.encode(text))
+        except Exception:
+            pass
+
+    # --- crude fallback ---
+    warnings.warn("Using crude character-based token estimate (no tokenizer available).")
     return max(1, int(len(text) / 4))
+
+
+# alias for compatibility
+approx_tokens_from_text = count_tokens
+
 
 # --- Normalization / EM -----------------------------------------------------
 def normalize_for_em(s: str) -> str:
