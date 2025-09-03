@@ -152,3 +152,43 @@ def bleu_score(pred: str, gold: str):
         return 0.0
     smoothing = SmoothingFunction().method1
     return sentence_bleu([gold.split()], pred.split(), smoothing_function=smoothing)
+
+
+def ensure_trace(
+    text: str,
+    prompt: str,
+    provider: str,
+    model: str,
+    latency_ms: int | None = None,
+    input_tokens: int | None = None,
+    output_tokens: int | None = None,
+    cost_usd: float | None = None,
+) -> dict:
+    """
+    Normalize a trace dictionary for a model call.
+    Fills in missing token counts, cost, and latency.
+    """
+    # Token counts
+    if input_tokens is None:
+        input_tokens = count_tokens(prompt, model)
+    if output_tokens is None:
+        output_tokens = count_tokens(text, model)
+
+    # Latency
+    if latency_ms is None:
+        latency_ms = -1
+
+    # Cost
+    if cost_usd is None:
+        cost_usd = estimate_cost_usd(provider.lower(), input_tokens, output_tokens)
+
+    return {
+        "text": text.strip() if isinstance(text, str) else str(text),
+        "input_tokens": int(input_tokens),
+        "output_tokens": int(output_tokens),
+        "latency_ms": int(latency_ms),
+        "cost_usd": float(cost_usd),
+        "provider": provider,
+        "model": model,
+    }
+

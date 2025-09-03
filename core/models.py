@@ -1,9 +1,10 @@
-import google.generativeai as genai
 import os
+
+import google.generativeai as genai
 import httpx
 from dotenv import load_dotenv
 
-from core.utils import approx_tokens_from_text, timed_call, estimate_cost_usd
+from core.utils import timed_call, ensure_trace
 
 
 class DummyModel:
@@ -23,20 +24,14 @@ class DummyModel:
 
     def ask_with_trace(self, question: str, context: str):
         prompt = f"Context:\n{context}\n\nQuestion: {question}"
-        # timed call wrapper for consistency
-        (res), latency_ms = timed_call(self._extract, prompt)
-        input_tokens = approx_tokens_from_text(prompt, model=None)
-        output_tokens = approx_tokens_from_text(res, model=None)
-        cost = estimate_cost_usd(self.provider_key, input_tokens, output_tokens)
-        return {
-            "text": res,
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens,
-            "latency_ms": latency_ms,
-            "cost_usd": cost,
-            "provider": self.provider_key,
-            "model": "dummy-echo"
-        }
+        res, latency_ms = timed_call(self._extract, prompt)
+        return ensure_trace(
+            text=res,
+            prompt=prompt,
+            provider=self.provider_key,
+            model="dummy-echo",
+            latency_ms=latency_ms,
+        )
 
 class OllamaModel:
     def __init__(self, model_name: str = "tinyllama:latest"):
@@ -142,37 +137,25 @@ class GeminiAPIModel:
         def _call():
             prompt_content = [
                 types.Content(
-                    role='user',
-                    parts=[
-                        types.Part.from_text(text=prompt_text)
-                    ]
+                    role="user",
+                    parts=[types.Part.from_text(text=prompt_text)],
                 )
             ]
             response = self._client.models.generate_content(
                 model=self.model_name,
                 contents=prompt_content,
-                config=types.GenerateContentConfig(
-                    temperature=0.0,
-                    max_output_tokens=256,
-                ),
+                config=types.GenerateContentConfig(temperature=0.0, max_output_tokens=256),
             )
-            # response.text gives combined text
-            # Some google-genai versions use response.candidates[0].content[].texts
             return response.text if hasattr(response, "text") else str(response)
 
         res, latency_ms = timed_call(_call)
-        input_tokens = approx_tokens_from_text(prompt_text, model=self.model_name)
-        output_tokens = approx_tokens_from_text(res, model=self.model_name)
-        cost = estimate_cost_usd(self.provider_key, input_tokens, output_tokens)
-        return {
-            "text": res.strip() if isinstance(res, str) else str(res),
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens,
-            "latency_ms": latency_ms,
-            "cost_usd": cost,
-            "provider": self.provider_key,
-            "model": self.model_name
-        }
+        return ensure_trace(
+            text=res,
+            prompt=prompt_text,
+            provider=self.provider_key,
+            model=self.model_name,
+            latency_ms=latency_ms,
+        )
 
 
 
@@ -237,26 +220,20 @@ class OpenRouterModule:
         def _call():
             response = self._client.post("/chat/completions", headers=self._headers, json=data)
             response.raise_for_status()
-            body = response.json()
-            content = body["choices"][0]["message"]["content"]
-            return content
+            return response.json()["choices"][0]["message"]["content"]
+
         try:
             res, latency_ms = timed_call(_call)
         except Exception as e:
-            res = f"[OpenRouter API error: {e}]"
-            latency_ms = 0
-        input_tokens = approx_tokens_from_text(data["messages"][0]["content"], model=self.model_name)
-        output_tokens = approx_tokens_from_text(res, model=self.model_name)
-        cost = estimate_cost_usd(self.provider_key, input_tokens, output_tokens)
-        return {
-            "text": res.strip() if isinstance(res, str) else str(res),
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens,
-            "latency_ms": latency_ms,
-            "cost_usd": cost,
-            "provider": self.provider_key,
-            "model": self.model_name
-        }
+            res, latency_ms = f"[OpenRouter API error: {e}]", 0
+
+        return ensure_trace(
+            text=res,
+            prompt=data["messages"][0]["content"],
+            provider=self.provider_key,
+            model=self.model_name,
+            latency_ms=latency_ms,
+        )
 def list_openrouter_models(free_only: bool = True) -> list[str]:
     """
     Returns a list of available models from OpenRouter.

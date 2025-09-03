@@ -1,12 +1,15 @@
-from typing import List, Dict
+import math
+import re
 import time
-import pandas as pd
+from typing import List, Dict
+
 import matplotlib.pyplot as plt
 import numpy as np
-import math
+import pandas as pd
 
 from core.utils import (normalize_for_em, strict_exact_match, edit_distance,
-                        approx_tokens_from_text, estimate_cost_usd, precision_recall_f1, bleu_score)
+                        precision_recall_f1, bleu_score, ensure_trace)
+
 
 # --- helpers ---------------------------------------------------------------
 def mean_confidence_interval(data, confidence=0.95):
@@ -37,12 +40,10 @@ def run_experiment(dataset: List[Dict], method, provider_key: str = "unknown") -
     return df
 
 def run_single(item: Dict, method, provider_key: str = "unknown", index: int = 0) -> Dict:
-    """Evaluate a single item; calls method.answer and tries to extract trace."""
     question = item["question"]
     doc = item.get("document") or item.get("doc")
     gold = item.get("answer")
     position = item.get("position")
-    context_tokens_approx = item.get("context_tokens", approx_tokens_from_text(doc or ""))
 
     if not doc:
         return {
@@ -59,95 +60,40 @@ def run_single(item: Dict, method, provider_key: str = "unknown", index: int = 0
             "latency_ms": 0,
             "cost_usd": 0.0,
             "provider": provider_key,
-            "model": getattr(method, "model", getattr(method, "name", "unknown"))
+            "model": getattr(method, "model", getattr(method, "name", "unknown")),
         }
 
-    # Prefer ask_with_trace if available via underlying model
-    # many methods call model.ask(question, context); to keep compatibility
-    # we prefer to call method.answer and then, if the model supports ask_with_trace,
-    # call it directly to get a trace (best effort).
-    # First call method.answer as before (it may already perform internal calls).
     pred = method.answer(question, doc) or ""
-
-    # Attempt to get a single best per-call trace:
-    input_tokens = None
-    output_tokens = None
-    latency_ms = None
-    cost_usd = None
-    provider = provider_key
     model_name = getattr(method, "model", getattr(method, "name", method.__class__.__name__))
 
-    # If the method exposes a .model and that model supports ask_with_trace, call it with
-    # the constructed context used by the method when answering (best-effort).
-    try:
-        the_model = getattr(method, "model", None)
-        if hasattr(the_model, "ask_with_trace"):
-            # Use doc as context (best-effort)
-            trace = the_model.ask_with_trace(question, doc)
-            if isinstance(trace, dict):
-                input_tokens = trace.get("input_tokens")
-                output_tokens = trace.get("output_tokens")
-                latency_ms = trace.get("latency_ms")
-                cost_usd = trace.get("cost_usd")
-                provider = trace.get("provider", provider)
-                model_name = trace.get("model", model_name)
-    except Exception:
-        # ignore trace failures; we'll estimate below
-        pass
+    trace = ensure_trace(
+        text=pred,
+        prompt=question + "\n" + doc,
+        provider=provider_key,
+        model=model_name,
+    )
 
-    # If trace missing, make crude estimates
-    if input_tokens is None:
-        input_tokens = approx_tokens_from_text(question + "\n" + doc)
-    if output_tokens is None:
-        output_tokens = approx_tokens_from_text(pred)
-    if latency_ms is None:
-        latency_ms = -1  # unknown
-    if cost_usd is None:
-        cost_usd = estimate_cost_usd(provider.lower(), input_tokens, output_tokens)
-
-    # strict EM and edit distance
     em = 1 if strict_exact_match(pred, gold) else 0
     ed = edit_distance(normalize_for_em(pred), normalize_for_em(gold))
     prec, rec, f1 = precision_recall_f1(pred, gold)
     bleu = bleu_score(pred, gold)
 
-    # false positive: predicted a code-like token but gold is missing or empty
-    import re
-    predicted_codes = re.findall(r"ANSWER-\d{4}", pred or "")
-    gold_codes = re.findall(r"ANSWER-\d{4}", gold or "")
-    false_positive = 1 if (predicted_codes and not gold_codes) else 0
-
-    # decoy confusion: predicted some valid code token that is present in doc but not the gold
-    # i.e., model returned an ANSWER-####, that appears in doc but differs from gold
-    decoy_confusion = 0
-    if predicted_codes:
-        for pc in predicted_codes:
-            if pc != gold and pc in doc:
-                decoy_confusion = 1
-                break
-
     row = {
         "i": index,
         "position": position,
-        "context_tokens": context_tokens_approx,
+        "context_tokens": item.get("context_tokens", trace["input_tokens"]),
         "answer": gold,
         "pred": pred,
         "EM": em,
         "edit_distance": ed,
-        "false_positive": false_positive,
-        "decoy_confusion": decoy_confusion,
-        "calls": 1,  # methods generally make 1 external call (methods may internally make several; if you need exact calls, instrument methods)
-        "input_tokens": int(input_tokens),
-        "output_tokens": int(output_tokens),
-        "latency_ms": int(latency_ms) if latency_ms is not None else -1,
-        "cost_usd": float(cost_usd),
-        "provider": provider,
-        "model": model_name,
+        "false_positive": int(bool(re.findall(r"ANSWER-\d{4}", pred)) and not re.findall(r"ANSWER-\d{4}", gold or "")),
+        "decoy_confusion": int(any(pc != gold and pc in doc for pc in re.findall(r"ANSWER-\d{4}", pred))),
+        "calls": 1,
+        **trace,
         "precision": prec,
         "recall": rec,
         "f1": f1,
         "bleu": bleu,
-
     }
     return row
 
