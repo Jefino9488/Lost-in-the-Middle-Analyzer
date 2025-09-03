@@ -1,4 +1,3 @@
-# app.py (replace file)
 import random
 import json
 import time
@@ -159,6 +158,12 @@ with st.sidebar:
         help="Number of synthetic documents to generate.",
         key="n_docs",
     )
+    metric_choice = st.selectbox(
+        "Metric to visualize",
+        ["EM", "precision", "recall", "f1", "bleu"],
+        index=0,
+        help="Choose which evaluation metric to plot."
+    )
     context_len = st.slider(
         "Context length (tokens, approx)", 500, 12000, st.session_state.get("context_len", 3000), step=500,
         help="Approximate size of each synthetic document.",
@@ -254,9 +259,9 @@ if run_btn:
     st.subheader("Results")
     col1, col2 = st.columns(2)
     with col1:
-        st.pyplot(plot_accuracy_by_position(results))
+        st.pyplot(plot_accuracy_by_position(results, metric=metric_choice))
     with col2:
-        st.pyplot(plot_accuracy_by_context(results))
+        st.pyplot(plot_accuracy_by_context(results, metric=metric_choice))
 
     st.markdown("### Aggregate summary (method × position)")
     agg = aggregate_summary(results, by=["model","position"])

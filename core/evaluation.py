@@ -152,39 +152,36 @@ def run_single(item: Dict, method, provider_key: str = "unknown", index: int = 0
     return row
 
 # --- plotting helpers ------------------------------------------------------
-def plot_accuracy_by_position(df: pd.DataFrame):
-    if df.empty:
+def plot_accuracy_by_position(df: pd.DataFrame, metric: str = "EM"):
+    if df.empty or metric not in df.columns:
         fig, ax = plt.subplots()
-        ax.text(0.5, 0.5, "No data", ha="center")
+        ax.text(0.5, 0.5, f"No data for {metric}", ha="center")
         return fig
-    acc = df.groupby("position")["EM"].mean().reindex(["start", "middle", "end"]).dropna()
+    acc = df.groupby("position")[metric].mean().reindex(["start", "middle", "end"]).dropna()
     fig, ax = plt.subplots(figsize=(6,4))
     acc.plot(kind="bar", ax=ax)
-    ax.set_ylim(0,1)
-    ax.set_title("Strict EM by answer position")
-    ax.set_ylabel("EM")
+    ax.set_ylim(0, 1 if metric in ["EM", "precision", "recall", "f1"] else None)
+    ax.set_title(f"{metric} by answer position")
+    ax.set_ylabel(metric)
     ax.set_xlabel("Position")
     for i, v in enumerate(acc.values):
         ax.text(i, v + 0.02, f"{v:.2f}", ha='center')
     plt.tight_layout()
     return fig
 
-def plot_accuracy_by_context(df: pd.DataFrame):
-    if df.empty:
+def plot_accuracy_by_context(df: pd.DataFrame, metric: str = "EM"):
+    if df.empty or metric not in df.columns:
         fig, ax = plt.subplots()
-        ax.text(0.5, 0.5, "No data", ha="center")
+        ax.text(0.5, 0.5, f"No data for {metric}", ha="center")
         return fig
-    # group by binned context token sizes
-    bins = sorted(set(min(df.context_tokens),) | set(df.context_tokens)) if False else None
-    # simpler: bin into 6 quantiles
     df = df.copy()
     df['ctx_bin'] = pd.qcut(df['context_tokens'].replace(0,1), q=6, duplicates='drop')
-    acc = df.groupby("ctx_bin")["EM"].mean().reset_index()
+    acc = df.groupby("ctx_bin")[metric].mean().reset_index()
     fig, ax = plt.subplots(figsize=(6,4))
-    ax.plot(range(len(acc)), acc["EM"], marker='o')
-    ax.set_ylim(0,1)
-    ax.set_title("EM vs. context length (binned)")
-    ax.set_ylabel("EM")
+    ax.plot(range(len(acc)), acc[metric], marker='o')
+    ax.set_ylim(0, 1 if metric in ["EM", "precision", "recall", "f1"] else None)
+    ax.set_title(f"{metric} vs. context length (binned)")
+    ax.set_ylabel(metric)
     ax.set_xlabel("Context bins (increasing)")
     plt.tight_layout()
     return fig
