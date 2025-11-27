@@ -4,7 +4,7 @@ import warnings
 
 from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
 try:
-    import tiktoken  # optional: better token counting if available
+    import tiktoken
     TIKTOKEN_AVAILABLE = True
 except Exception:
     TIKTOKEN_AVAILABLE = False
@@ -148,7 +148,7 @@ def bleu_score(pred: str, gold: str):
     """
     Compute BLEU score between predicted and gold text.
     """
-    if not pred or not gold:
+    if not pred or not gold: # optional: better token counting if available
         return 0.0
     smoothing = SmoothingFunction().method1
     return sentence_bleu([gold.split()], pred.split(), smoothing_function=smoothing)

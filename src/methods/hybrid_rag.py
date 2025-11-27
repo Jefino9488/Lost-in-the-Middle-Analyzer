@@ -5,7 +5,7 @@ class HybridRAG:
     def __init__(self, model, top_k: int = 3):
         self.model = model
         self.top_k = top_k
-    def answer(self, question: str, document: str) -> str:
+    def answer(self, question: str, document: str) -> dict:
         # BM25 step
         chunks = document.split(". ")
         tokenized = [c.split() for c in chunks]
@@ -18,4 +18,5 @@ class HybridRAG:
             prompt = f"Summarize context for answering: '{question}'\n\n{ch}"
             summarized.append(self.model.ask(question, prompt))
         context = "\n".join(summarized)
-        return self.model.ask(question, context)
+        ans = self.model.ask(question, context)
+        return {"answer": ans, "retrieved_chunks": top_chunks}

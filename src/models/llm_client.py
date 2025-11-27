@@ -4,7 +4,7 @@ import google.generativeai as genai
 import httpx
 from dotenv import load_dotenv
 
-from core.utils import timed_call, ensure_trace
+from src.utils import timed_call, ensure_trace
 
 
 class DummyModel:

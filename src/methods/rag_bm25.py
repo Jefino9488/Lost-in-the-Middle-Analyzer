@@ -15,14 +15,16 @@ class RAGBM25:
         chunks = [" ".join(words[i:i+n]) for i in range(0, len(words), n)]
         return chunks
 
-    def answer(self, question: str, document: str) -> str:
+    def answer(self, question: str, document: str) -> dict:
         chunks = self._split(document)
         tokenized = [c.split() for c in chunks]
         if not tokenized:
-            return ""
+            return {"answer": "", "retrieved_chunks": []}
         bm25 = BM25Okapi(tokenized)
         q_tokens = question.split()
         scores = bm25.get_scores(q_tokens)
         top_idx = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[: self.top_k]
-        context = "\n\n".join(chunks[i] for i in top_idx)
-        return self.model.ask(question, context)
+        top_chunks = [chunks[i] for i in top_idx]
+        context = "\n\n".join(top_chunks)
+        ans = self.model.ask(question, context)
+        return {"answer": ans, "retrieved_chunks": top_chunks}

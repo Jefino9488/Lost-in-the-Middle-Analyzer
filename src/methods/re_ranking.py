@@ -5,7 +5,7 @@ class ReRanking:
     def __init__(self, model, top_k: int = 3):
         self.model = model
         self.top_k = top_k
-    def answer(self, question: str, document: str) -> str:
+    def answer(self, question: str, document: str) -> dict:
         # BM25 retrieve
         chunks = document.split(". ")
         tokenized = [c.split() for c in chunks]
@@ -15,4 +15,5 @@ class ReRanking:
         top_chunks = [chunks[i] for i, _ in ranked[:self.top_k]]
         # Ask model on concatenated top chunks
         context = "\n".join(top_chunks)
-        return self.model.ask(question, context)
+        ans = self.model.ask(question, context)
+        return {"answer": ans, "retrieved_chunks": top_chunks}
