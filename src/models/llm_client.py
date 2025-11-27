@@ -1,10 +1,73 @@
 import os
+import json
+import time
+import requests
+import joblib
+from typing import List, Dict, Any, Optional
 
 import google.generativeai as genai
+from openai import OpenAI
 import httpx
 from dotenv import load_dotenv
 
 from src.utils import timed_call, ensure_trace
+
+# Initialize joblib memory for caching
+memory = joblib.Memory(location=".cache", verbose=0)
+
+@memory.cache
+def _cached_ask_dummy(question: str, context: str) -> str:
+    # Dummy doesn't really need caching but good for consistency
+    if "ANSWER-" in context:
+        import re
+        match = re.search(r"ANSWER-(\d{4})", context)
+        if match:
+            return f"The answer is ANSWER-{match.group(1)}"
+    return "I couldn't find the answer."
+
+@memory.cache
+def _cached_ask_ollama(model_name: str, base_url: str, question: str, context: str) -> str:
+    prompt = f"Context:\n{context}\n\nQuestion: {question}\n\nAnswer:"
+    payload = {
+        "model": model_name,
+        "prompt": prompt,
+        "stream": False
+    }
+    try:
+        response = requests.post(f"{base_url}/api/generate", json=payload)
+        response.raise_for_status()
+        return response.json().get("response", "")
+    except Exception as e:
+        return f"Error: {e}"
+
+@memory.cache
+def _cached_ask_gemini(model_name: str, api_key: str, question: str, context: str) -> str:
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel(model_name)
+    prompt = f"Context:\n{context}\n\nQuestion: {question}\n\nAnswer:"
+    try:
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        return f"Error: {e}"
+
+@memory.cache
+def _cached_ask_openrouter(model_name: str, api_key: str, question: str, context: str) -> str:
+    client = OpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=api_key,
+    )
+    prompt = f"Context:\n{context}\n\nQuestion: {question}\n\nAnswer:"
+    try:
+        completion = client.chat.completions.create(
+            model=model_name,
+            messages=[
+                {"role": "user", "content": prompt}
+            ]
+        )
+        return completion.choices[0].message.content
+    except Exception as e:
+        return f"Error: {e}"
 
 
 class DummyModel:
@@ -12,19 +75,17 @@ class DummyModel:
     provider_key = "dummy-local"
     @staticmethod
     def _extract(context_and_question: str) -> str:
-        import re
-        m = re.search(r"ANSWER-\d{4}", context_and_question)
-        if m:
-            return m.group(0)
-        m2 = re.search(r"ANSWER-\d{4}", context_and_question)
-        return m2.group(0) if m2 else "I couldn't find the code."
+        # Use cached function for extraction logic if needed, but here we just call the cached wrapper
+        return _cached_ask_dummy(context_and_question, context_and_question)
 
     def ask(self, question: str, context: str) -> str:
-        return self._extract(context + "\n" + question)
+        return _cached_ask_dummy(question, context)
 
     def ask_with_trace(self, question: str, context: str):
         prompt = f"Context:\n{context}\n\nQuestion: {question}"
-        res, latency_ms = timed_call(self._extract, prompt)
+        # We wrap the cached call in timed_call to still measure "latency" (even if cached)
+        # But for Dummy, latency is negligible.
+        res, latency_ms = timed_call(self.ask, question, context)
         return ensure_trace(
             text=res,
             prompt=prompt,
@@ -38,34 +99,8 @@ class OllamaModel:
         self.model_name = model_name
 
     def ask(self, question: str, context: str) -> str:
-        prompt = f"Context:\n{context}\n\nQuestion: {question}\nAnswer concisely."
-        base_url = os.getenv("OLLAMA_BASE_URL") or os.getenv("OLLAMA_HOST")
-        if base_url:
-            try:
-                url = base_url.rstrip("/") + "/api/generate"
-                payload = {
-                    "model": self.model_name,
-                    "prompt": prompt,
-                    "stream": False,
-                }
-                resp = httpx.post(url, json=payload, timeout=120)
-                resp.raise_for_status()
-                data = resp.json()
-                text = data.get("response") or data.get("text") or ""
-                return str(text).strip()
-            except Exception as e:
-                return f"[Ollama HTTP error: {e}]"
-        try:
-            import subprocess
-            result = subprocess.run(
-                ["ollama", "run", self.model_name],
-                input=prompt.encode("utf-8"),
-                capture_output=True,
-                check=True,
-            )
-            return result.stdout.decode("utf-8").strip()
-        except Exception as e:
-            return f"[Ollama error: {e}]"
+        base_url = os.getenv("OLLAMA_BASE_URL") or os.getenv("OLLAMA_HOST") or "http://localhost:11434"
+        return _cached_ask_ollama(self.model_name, base_url, question, context)
 
 
 def list_ollama_models():
@@ -120,35 +155,18 @@ def list_ollama_models():
 class GeminiAPIModel:
     provider_key = "gemini"
     def __init__(self, model_name: str = "gemini-2.0-flash"):
-        import os
-        from google import genai
         self.model_name = model_name or "gemini-2.0-flash"
-        api_key = os.getenv("GOOGLE_API_KEY")
-        if not api_key:
+        self.api_key = os.getenv("GOOGLE_API_KEY")
+        if not self.api_key:
             raise RuntimeError("GOOGLE_API_KEY not set.")
-        self._client = genai.Client(api_key=api_key)
 
     def ask(self, question: str, context: str) -> str:
-        return self.ask_with_trace(question, context)["text"]
+        return _cached_ask_gemini(self.model_name, self.api_key, question, context)
 
     def ask_with_trace(self, question: str, context: str):
-        from google.genai import types
         prompt_text = f"Context:\n{context}\n\nQuestion: {question}\nAnswer with only the exact code if present."
-        def _call():
-            prompt_content = [
-                types.Content(
-                    role="user",
-                    parts=[types.Part.from_text(text=prompt_text)],
-                )
-            ]
-            response = self._client.models.generate_content(
-                model=self.model_name,
-                contents=prompt_content,
-                config=types.GenerateContentConfig(temperature=0.0, max_output_tokens=256),
-            )
-            return response.text if hasattr(response, "text") else str(response)
-
-        res, latency_ms = timed_call(_call)
+        # Wrap cached call
+        res, latency_ms = timed_call(self.ask, question, context)
         return ensure_trace(
             text=res,
             prompt=prompt_text,
@@ -157,79 +175,23 @@ class GeminiAPIModel:
             latency_ms=latency_ms,
         )
 
-
-
-def list_gemini_models():
-    """Return a list of available Gemini/GenAI models that support generateContent.
-    """
-    try:
-        load_dotenv()
-
-        api_key = os.getenv("GOOGLE_API_KEY")
-        if not api_key:
-            return ["API key not set (set GOOGLE_API_KEY in your .env file)"]
-
-        genai.configure(api_key=api_key)
-
-        models = []
-        print("Fetching model list. This may take a moment...")
-        for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods:
-                models.append(m.name)
-
-        if not models:
-            return ["No models found that support generateContent"]
-
-        return models
-
-    except ImportError:
-        return [
-            "google-generativeai or python-dotenv not installed. Run: pip install -q -U google-generativeai python-dotenv"]
-    except Exception as e:
-        return [f"Gemini API error: {e}"]
-
-
 class OpenRouterModule:
     provider_key = "openrouter"
     def __init__(self, model_name: str = "google/gemini-pro"):
-        load_dotenv()
         self.model_name = model_name
         self._api_key = os.getenv("OPENROUTER_API_KEY")
         if not self._api_key:
             raise ValueError("OPENROUTER_API_KEY environment variable not set.")
-        self._headers = {
-            "Authorization": f"Bearer {self._api_key}",
-            "Content-Type": "application/json",
-            "X-Title": "Lost-in-the-Middle Analyzer",
-        }
-        self._client = httpx.Client(base_url="https://openrouter.ai/api/v1")
 
     def ask(self, question: str, context: str) -> str:
-        return self.ask_with_trace(question, context)["text"]
+        return _cached_ask_openrouter(self.model_name, self._api_key, question, context)
 
     def ask_with_trace(self, question: str, context: str):
-        data = {
-            "model": self.model_name,
-            "messages": [
-                {"role": "user",
-                 "content": f"Context: {context}\n\nQuestion: {question}\nAnswer with only the exact code if present."}
-            ],
-            "temperature": 0.0,
-            "max_tokens": 256,
-        }
-        def _call():
-            response = self._client.post("/chat/completions", headers=self._headers, json=data)
-            response.raise_for_status()
-            return response.json()["choices"][0]["message"]["content"]
-
-        try:
-            res, latency_ms = timed_call(_call)
-        except Exception as e:
-            res, latency_ms = f"[OpenRouter API error: {e}]", 0
-
+        # Wrap cached call
+        res, latency_ms = timed_call(self.ask, question, context)
         return ensure_trace(
             text=res,
-            prompt=data["messages"][0]["content"],
+            prompt=f"Context: {context}\n\nQuestion: {question}",
             provider=self.provider_key,
             model=self.model_name,
             latency_ms=latency_ms,
