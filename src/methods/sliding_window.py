@@ -6,24 +6,36 @@ class SlidingWindow:
         self.num_windows = num_windows
 
     def answer(self, question: str, document: str) -> dict:
-        doc = document
-        L = len(doc)
-        # create overlapping windows evenly spaced
-        if self.num_windows <= 0:
+        from src.utils import chunk_text_by_tokens
+        
+        # Create token-aware overlapping windows
+        chunks, metadatas = chunk_text_by_tokens(
+            document,
+            chunk_tokens=self.window_size,
+            overlap_tokens=self.window_size // 4  # 25% overlap for continuity
+        )
+        
+        if not chunks:
             return {"answer": "", "retrieved_chunks": []}
-        step = max(1, (L - self.window_size) // max(1, self.num_windows - 1)) if L > self.window_size else self.window_size
+        
+        # Limit to num_windows
+        chunks = chunks[:self.num_windows]
+        metadatas = metadatas[:self.num_windows]
+        
         candidates = []
         retrieved = []
-        for i in range(0, L, step):
-            chunk = doc[i:i + self.window_size]
+        
+        for chunk, metadata in zip(chunks, metadatas):
             if not chunk:
                 continue
-            retrieved.append(chunk)
+            
+            retrieved.append({
+                "text": chunk,
+                "metadata": metadata
+            })
             candidates.append(self.model.ask(question, chunk))
-            if len(candidates) >= self.num_windows:
-                break
-
-        # first try to return any candidate that looks valid
+        
+        # First try to return any candidate that looks valid
         ans = ""
         for c in candidates:
             if c and "couldn't find" not in c.lower():
