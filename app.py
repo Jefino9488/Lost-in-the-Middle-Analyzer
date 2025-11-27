@@ -1,21 +1,30 @@
-import random
 import json
+import random
 import time
 
 import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
 
-from core.evaluation import plot_accuracy_by_position, plot_accuracy_by_context, run_experiment, aggregate_summary, run_single
-from core.generator import make_dataset
-from core.methods.full_context import FullContext
-from core.methods.hybrid_rag import HybridRAG
-from core.methods.map_reduce import MapReduce
-from core.methods.query_summarization import QuerySummarization
-from core.methods.rag_bm25 import RAGBM25
-from core.methods.re_ranking import ReRanking
-from core.methods.sliding_window import SlidingWindow
-from core.models import get_model, list_ollama_models, list_gemini_models, list_openrouter_models
+from src.evaluation.runner import aggregate_summary, run_single
+from src.visualization.plots import plot_accuracy_by_position, plot_accuracy_by_context, plot_heatmap
+from src.data.generator import get_generator
+from src.methods.full_context import FullContext
+from src.methods.hybrid_rag import HybridRAG
+from src.methods.map_reduce import MapReduce
+from src.methods.query_summarization import QuerySummarization
+from src.methods.rag_bm25 import RAGBM25
+from src.methods.re_ranking import ReRanking
+from src.methods.sliding_window import SlidingWindow
+from src.methods.novel_methods import (
+    PositionWeightedWindow,
+    SemanticReRanking,
+    CompressionAwareRAG,
+    CoTBridging,
+    AnswerBiasedDenoising
+)
+from src.methods.vector_rag import VectorRAG
+from src.models.llm_client import get_model, list_ollama_models, list_gemini_models, list_openrouter_models
 
 load_dotenv()
 st.set_page_config(page_title="Lost-in-the-Middle Analyzer", page_icon="📏", layout="wide")
@@ -135,7 +144,13 @@ with st.sidebar:
             "Map-Reduce",
             "Re-Ranking",
             "Query-Summarization",
-            "Hybrid-RAG"
+            "Hybrid-RAG",
+            "Position-Weighted Window",
+            "Semantic Chunk Re-ranking",
+            "Compression-aware RAG",
+            "Chain-of-Thought Bridging",
+            "Answer-biased Denoising",
+            "Vector RAG"
         ],
         index=2,
         help="How to process long contexts: full pass, sliding windows, retrieval + rank/summarization, etc.",
@@ -158,9 +173,16 @@ with st.sidebar:
         help="Number of synthetic documents to generate.",
         key="n_docs",
     )
+    dataset_tier = st.selectbox(
+        "Dataset Tier",
+        ["Tier 1 (Synthetic)", "Tier 2 (Real)", "Tier 3 (Adversarial)", "Tier 4 (Multi-hop)"],
+        index=0,
+        help="Choose the complexity of the dataset: Synthetic (Faker), Real (Wikitext), Adversarial (Distractors), or Multi-hop (Reasoning).",
+        key="dataset_tier"
+    )
     metric_choice = st.selectbox(
         "Metric to visualize",
-        ["EM", "precision", "recall", "f1", "bleu"],
+        ["EM", "precision", "recall", "f1", "bleu", "hit_rate", "mrr"],
         index=0,
         help="Choose which evaluation metric to plot."
     )
@@ -194,7 +216,13 @@ method_map = {
     "Map-Reduce": MapReduce(model=model, chunk_size=window_size, top_k=top_k),
     "Re-Ranking": ReRanking(model=model, top_k=top_k),
     "Query-Summarization": QuerySummarization(model=model, top_k=top_k),
-    "Hybrid-RAG": HybridRAG(model=model, top_k=top_k)
+    "Hybrid-RAG": HybridRAG(model=model, top_k=top_k),
+    "Position-Weighted Window": PositionWeightedWindow(model=model, window_size=window_size),
+    "Semantic Chunk Re-ranking": SemanticReRanking(model=model, top_k=top_k),
+    "Compression-aware RAG": CompressionAwareRAG(model=model, chunk_size=window_size),
+    "Chain-of-Thought Bridging": CoTBridging(model=model, chunk_size=window_size),
+    "Answer-biased Denoising": AnswerBiasedDenoising(model=model),
+    "Vector RAG": VectorRAG(model=model, top_k=top_k)
 }
 method = method_map[method_name]
 
@@ -209,6 +237,7 @@ if re_run_last and st.session_state["last_config"]:
         "n_docs": cfg.get("n_docs", st.session_state.get("n_docs")),
         "context_len": cfg.get("context_len", st.session_state.get("context_len")),
         "positions": cfg.get("positions", st.session_state.get("positions")),
+        "dataset_tier": cfg.get("dataset_tier", st.session_state.get("dataset_tier")),
         "seed": cfg.get("seed", st.session_state.get("seed")),
         "show_cost_latency": cfg.get("show_cost_latency", st.session_state.get("show_cost_latency", True)),
     })
@@ -223,13 +252,15 @@ if run_btn:
         "n_docs": n_docs,
         "context_len": context_len,
         "positions": positions,
+        "dataset_tier": dataset_tier,
         "seed": seed,
         "show_cost_latency": bool(show_cost_latency),
     }
 
     random.seed(seed)
     with st.spinner("Generating dataset..."):
-        ds = make_dataset(n_docs=n_docs, context_tokens=context_len, positions=positions)
+        generator = get_generator(dataset_tier)
+        ds = generator.generate(n_docs=n_docs, context_tokens=context_len, positions=positions)
     st.success(f"Generated {len(ds)} synthetic items.")
 
     st.subheader("Running evaluation...")
@@ -262,6 +293,9 @@ if run_btn:
         st.pyplot(plot_accuracy_by_position(results, metric=metric_choice))
     with col2:
         st.pyplot(plot_accuracy_by_context(results, metric=metric_choice))
+        
+    st.markdown("### Heatmap (Position vs Context)")
+    st.pyplot(plot_heatmap(results, metric=metric_choice))
 
     st.markdown("### Aggregate summary (method × position)")
     agg = aggregate_summary(results, by=["model","position"])
@@ -275,7 +309,9 @@ if run_btn:
         "method_name": method_name,
         "n_docs": int(n_docs),
         "context_len": int(context_len),
+        "context_len": int(context_len),
         "positions": positions,
+        "dataset_tier": dataset_tier,
         "run_start": int(start_run),
         "run_end": int(time.time())
     }
