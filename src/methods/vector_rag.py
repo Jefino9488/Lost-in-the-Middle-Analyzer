@@ -19,16 +19,17 @@ class VectorRAG:
             self._index_document(document)
         
     def _chunk_text(self, text):
-        # Simple character-based chunking with overlap
-        chunks = []
-        metadatas = []
-        overlap = 50
-        step = max(1, self.chunk_size - overlap)
-        for i in range(0, len(text), step):
-            chunk_text = text[i:i+self.chunk_size]
-            chunks.append(chunk_text)
-            metadatas.append({"start": i, "end": i + len(chunk_text)})
-        return chunks, metadatas
+        """Token-aware chunking for vector embeddings."""
+        from src.utils import chunk_text_by_tokens
+        
+        chunks, metadatas = chunk_text_by_tokens(
+            text,
+            chunk_tokens=self.chunk_size,
+            overlap_tokens=50  # Overlap for context continuity
+        )
+        
+        # Return in expected format (chunks list, metadatas list)
+        return [c for c in chunks], metadatas
 
     def _index_document(self, document: str):
         # Delete previous collection if it exists

@@ -144,90 +144,188 @@ class Tier3Adversarial(Tier2Real):
             true_answer = item["answer"]
             true_code = true_answer.split("-")[1]
             
-            # Create a distractor
-            distractor_code = str(int(true_code) + 1) # Close number
-            distractor = f"ANSWER-{distractor_code}"
+            # Generate multiple semantic distractor types
+            distractors = []
+            distractor_sentences = []
             
-            # Inject distractor at a different position
-            # If answer is at start, put distractor at end, etc.
-            # We'll just append/prepend or insert it into the text.
+            # Type 1: Close number variants (+/-1)
+            close_code_plus = str(int(true_code) + 1)
+            close_code_minus = str(max(1000, int(true_code) - 1))
+            distractors.append(f"ANSWER-{close_code_plus}")
+            distractors.append(f"ANSWER-{close_code_minus}")
+            
+            # Type 2: Digit transposition (1234 -> 1243)
+            if len(true_code) >= 2:
+                digits = list(true_code)
+                # Swap last two digits
+                digits[-1], digits[-2] = digits[-2], digits[-1]
+                transposed_code = ''.join(digits)
+                distractors.append(f"ANSWER-{transposed_code}")
+            
+            # Type 3: Create contextual paraphrases
+            distractor_sentences = [
+                f"The preliminary access code was {distractors[0]}.",
+                f"Prior versions used the identifier {distractors[1]}.",
+                f"The deprecated code {distractors[2] if len(distractors) > 2 else distractors[0]} should not be used.",
+                f"During testing, we encountered {distractors[0]}, but this was incorrect.",
+                f"The system previously generated {distractors[1]} before the update."
+            ]
             
             doc = item["document"]
             words = doc.split()
             
-            # Simple injection strategy for now:
-            # If position is start, put distractor in middle or end
-            # We don't want to overwrite the true answer.
+            # Insert 2-3 random distractors at different positions
+            n_distractors = random.randint(2, 3)
+            selected_sentences = random.sample(distractor_sentences, n_distractors)
             
-            # Let's just insert it at a random location that is NOT the true answer location
-            # But we need to be careful not to make the distractor the "first" answer if the model just picks the first one?
-            # The prompt says "exact code".
-            # Let's add a "near-miss" sentence.
-            
-            distractor_sentence = f" The code for the previous section was ANSWER-{distractor_code}. "
-            
-            # Insert randomly
-            insert_idx = random.randint(0, len(words))
-            words.insert(insert_idx, distractor_sentence)
+            for distractor_sent in selected_sentences:
+                # Find a position far from true answer
+                true_pos = doc.find(true_answer)
+                doc_len = len(doc)
+                
+                # Try to place distractor in opposite third of document
+                if true_pos < doc_len // 3:
+                    # True answer in first third, place distractor in last third
+                    insert_range = (2 * len(words) // 3, len(words))
+                elif true_pos > 2 * doc_len // 3:
+                    # True answer in last third, place distractor in first third
+                    insert_range = (0, len(words) // 3)
+                else:
+                    # True answer in middle, place at edges
+                    insert_range = (0, len(words) // 4) if random.random() < 0.5 else (3 * len(words) // 4, len(words))
+                
+                insert_idx = random.randint(max(0, insert_range[0]), min(len(words), insert_range[1]))
+                words.insert(insert_idx, f" {distractor_sent} ")
             
             item["document"] = " ".join(words)
-            
+        
         # Recalculate offsets because document changed
         return self._add_offsets(base_items)
 
 class Tier4MultiHop(Tier2Real):
     def generate(self, n_docs: int, context_tokens: int, positions: List[str]) -> List[Dict]:
         dataset = []
+        
+        # Different reasoning task types
+        task_types = ["coreference", "temporal", "compositional"]
+        
         for _ in range(n_docs):
-            # We need 2 facts.
-            # Fact 1: "The secret code is X."
-            # Fact 2: "The operation is Y."
-            # Question: "What is the result of operation Y on code X?" (Requires reasoning)
+            task_type = random.choice(task_types)
+            chunk_size = context_tokens // 4  # Use 4 chunks for more spacing
             
-            # Or simpler: "What is the code mentioned in the section about [Topic A]?"
-            # But that's just retrieval.
-            
-            # Let's do:
-            # Fact A: "Project Alpha's code is 1234."
-            # Fact B: "Project Beta's code is 5678."
-            # Question: "What is the sum of Project Alpha and Project Beta codes?"
-            
-            code_a = random.randint(100, 999)
-            code_b = random.randint(100, 999)
-            sum_code = code_a + code_b
-            
-            fact_a = f"The security code for Project Alpha is {code_a}."
-            fact_b = f"The security code for Project Beta is {code_b}."
-            
-            # Generate background text
-            chunk_size = context_tokens // 3
-            part1 = self._get_real_text(chunk_size)
-            part2 = self._get_real_text(chunk_size)
-            part3 = self._get_real_text(chunk_size)
-            
-            # Insert facts at random positions
-            # We have 3 chunks. We can put facts in between or inside.
-            # Let's put Fact A in Part 1 and Fact B in Part 3 (long range dependency).
-            
-            # Inject into text
-            words1 = part1.split()
-            words1.insert(random.randint(0, len(words1)), fact_a)
-            part1 = " ".join(words1)
-            
-            words3 = part3.split()
-            words3.insert(random.randint(0, len(words3)), fact_b)
-            part3 = " ".join(words3)
-            
-            doc = f"{part1}\n\n{part2}\n\n{part3}"
+            if task_type == "coreference":
+                # Coreference resolution: "Company A's code is X. They also have Y. What is A's first code?"
+                company = random.choice(["Acme Corp", "GlobalTech", "Innovate Inc", "TechVision"])
+                code_a = random.randint(1000, 9999)
+                code_b = random.randint(1000, 9999)
+                
+                fact1 = f"The primary access code for {company} is ANSWER-{code_a}."
+                fact2 = f"They also maintain a secondary code of ANSWER-{code_b} for backup systems."
+                distractor = f"A different company uses ANSWER-{random.randint(1000, 9999)} for their operations."
+                
+                # Generate background
+                part1 = self._get_real_text(chunk_size)
+                part2 = self._get_real_text(chunk_size)
+                part3 = self._get_real_text(chunk_size)
+                part4 = self._get_real_text(chunk_size)
+                
+                # Inject facts far apart
+                words1 = part1.split()
+                words1.insert(random.randint(len(words1)//2, len(words1)), fact1)  # Later in first chunk
+                part1 = " ".join(words1)
+                
+                words3 = part3.split()
+                words3.insert(random.randint(0, len(words3)//2), fact2)  # Earlier in third chunk
+                part3 = " ".join(words3)
+                
+                # Add distractor in middle
+                words2 = part2.split()
+                words2.insert(random.randint(0, len(words2)), distractor)
+                part2 = " ".join(words2)
+                
+                doc = f"{part1}\n\n{part2}\n\n{part3}\n\n{part4}"
+                question = f"What is the primary access code for {company}? Respond with the exact code."
+                answer = f"ANSWER-{code_a}"
+                
+            elif task_type == "temporal":
+                # Temporal reasoning: "Code changed from X to Y in 2020. What was it before 2020?"
+                old_code = random.randint(1000, 9999)
+                new_code = random.randint(1000, 9999)
+                year = random.randint(2018, 2022)
+                
+                fact1 = f"Before {year}, the system access code was ANSWER-{old_code}."
+                fact2 = f"In {year}, security protocols were updated and the new code became ANSWER-{new_code}."
+                distractor = f"Another system has used ANSWER-{random.randint(1000, 9999)} since {year-3}."
+                
+                part1 = self._get_real_text(chunk_size)
+                part2 = self._get_real_text(chunk_size)
+                part3 = self._get_real_text(chunk_size)
+                part4 = self._get_real_text(chunk_size)
+                
+                # Place temporal facts in different sections
+                words2 = part2.split()
+                words2.insert(random.randint(0, len(words2)), fact1)
+                part2 = " ".join(words2)
+                
+                words4 = part4.split()
+                words4.insert(random.randint(0, len(words4)), fact2)
+                part4 = " ".join(words4)
+                
+                words1 = part1.split()
+                words1.insert(random.randint(0, len(words1)), distractor)
+                part1 = " ".join(words1)
+                
+                doc = f"{part1}\n\n{part2}\n\n{part3}\n\n{part4}"
+                question = f"What was the system access code before {year}? Respond with the exact code."
+                answer = f"ANSWER-{old_code}"
+                
+            else:  # compositional
+                # Compositional: "Project needs codes A and B. A is PREFIX, B is SUFFIX. What is complete code?"
+                prefix = random.randint(10, 99)
+                suffix = random.randint(10, 99)
+                complete_code = f"{prefix}{suffix}"
+                
+                fact1 = f"The system prefix for authentication is {prefix}."
+                fact2 = f"The security suffix code is {suffix}."
+                fact3 = f"Complete access requires combining the authentication prefix with the security suffix."
+                distractor = f"Legacy systems used prefix {random.randint(10, 99)} which is now deprecated."
+                
+                part1 = self._get_real_text(chunk_size)
+                part2 = self._get_real_text(chunk_size)
+                part3 = self._get_real_text(chunk_size)
+                part4 = self._get_real_text(chunk_size)
+                
+                # Distribute facts across document
+                words1 = part1.split()
+                words1.insert(random.randint(0, len(words1)), fact1)
+                part1 = " ".join(words1)
+                
+                words2 = part2.split()
+                words2.insert(random.randint(0, len(words2)), distractor)
+                part2 = " ".join(words2)
+                
+                words3 = part3.split()
+                words3.insert(random.randint(0, len(words3)), fact2)
+                part3 = " ".join(words3)
+                
+                words4 = part4.split()
+                words4.insert(random.randint(0, len(words4)), fact3)
+                part4 = " ".join(words4)
+                
+                doc = f"{part1}\n\n{part2}\n\n{part3}\n\n{part4}"
+                question = "What is the complete access code (prefix + suffix)? Respond with just the numbers."
+                answer = complete_code
             
             dataset.append({
                 "document": doc,
-                "question": "What is the sum of the security codes for Project Alpha and Project Beta? Respond with just the number.",
-                "answer": str(sum_code),
-                "position": "multi-hop", # Special position
+                "question": question,
+                "answer": answer,
+                "position": f"multi-hop-{task_type}",
                 "context_tokens": context_tokens,
-                "tier": "Tier 4 (Multi-hop)"
+                "tier": "Tier 4 (Multi-hop)",
+                "reasoning_type": task_type
             })
+        
         return self._add_offsets(dataset)
 
 def get_generator(tier: str):

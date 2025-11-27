@@ -154,6 +154,153 @@ def bleu_score(pred: str, gold: str):
     return sentence_bleu([gold.split()], pred.split(), smoothing_function=smoothing)
 
 
+def truncate_text_center(text: str, max_tokens: int, model: str = None) -> tuple[str, bool]:
+    """
+    Truncate text using center-preserving strategy if it exceeds max_tokens.
+    Keeps first 40% and last 40% of tokens, drops middle 20%.
+    
+    Args:
+        text: Text to potentially truncate
+        max_tokens: Maximum allowed tokens
+        model: Optional model hint for token counting
+    
+    Returns:
+        (truncated_text, was_truncated): Tuple of result text and boolean flag
+    """
+    if not text:
+        return text, False
+    
+    current_tokens = count_tokens(text, model)
+    
+    if current_tokens <= max_tokens:
+        return text, False
+    
+    # Need to truncate - keep first 40%, last 40%, drop middle 20%
+    # Approximate character positions based on token ratio
+    chars_per_token = len(text) / current_tokens if current_tokens > 0 else 4
+    target_chars = int(max_tokens * chars_per_token)
+    
+    # Split into first 40% and last 40%
+    first_chunk_size = int(target_chars * 0.4)
+    last_chunk_size = int(target_chars * 0.4)
+    
+    first_part = text[:first_chunk_size]
+    last_part = text[-last_chunk_size:] if last_chunk_size > 0 else ""
+    
+    truncated = f"{first_part}\n\n[...middle section truncated due to token limit...]\n\n{last_part}"
+    
+    return truncated, True
+
+
+def chunk_text_by_tokens(
+    text: str,
+    chunk_tokens: int,
+    overlap_tokens: int = 0,
+    model: str = None
+) -> tuple[list[str], list[dict]]:
+    """
+    Chunk text using token-aware boundaries instead of character counts.
+    
+    Args:
+        text: Text to chunk
+        chunk_tokens: Target tokens per chunk
+        overlap_tokens: Number of tokens to overlap between chunks
+        model: Optional model hint for tokenizer selection
+    
+    Returns:
+        (chunks, metadatas): List of text chunks and corresponding metadata dicts
+            Metadata includes: start, end (char positions), estimated_tokens, chunk_index
+    """
+    if not text:
+        return [], []
+    
+    chunks = []
+    metadatas = []
+    
+    # Try to use tiktoken for accurate token splitting
+    if TIKTOKEN_AVAILABLE:
+        try:
+            enc = tiktoken.encoding_for_model(model) if model else tiktoken.get_encoding("cl100k_base")
+            
+            # Encode entire text
+            tokens = enc.encode(text)
+            total_tokens = len(tokens)
+            
+            # Calculate step size (accounting for overlap)
+            step = max(1, chunk_tokens - overlap_tokens)
+            
+            chunk_idx = 0
+            position = 0
+            
+            while position < total_tokens:
+                # Extract chunk tokens
+                end_position = min(position + chunk_tokens, total_tokens)
+                chunk_tokens_slice = tokens[position:end_position]
+                
+                # Decode back to text
+                chunk_text = enc.decode(chunk_tokens_slice)
+                
+                # Find character positions (approximate via search)
+                # This is imperfect but gives reasonable boundaries
+                if chunk_idx == 0:
+                    char_start = 0
+                else:
+                    # Find where this chunk starts in the original text
+                    # Use the previous chunk end as a hint
+                    search_start = metadatas[-1]["end"] if metadatas else 0
+                    char_start = text.find(chunk_text[:min(50, len(chunk_text))], search_start)
+                    if char_start == -1:
+                        char_start = search_start
+                
+                char_end = char_start + len(chunk_text)
+                
+                chunks.append(chunk_text)
+                metadatas.append({
+                    "start": char_start,
+                    "end": char_end,
+                    "estimated_tokens": len(chunk_tokens_slice),
+                    "chunk_index": chunk_idx
+                })
+                
+                position += step
+                chunk_idx += 1
+            
+            return chunks, metadatas
+            
+        except Exception as e:
+            # Fall through to character-based chunking
+            warnings.warn(f"Token-based chunking failed ({e}), using character fallback")
+    
+    # Fallback: character-based chunking with token estimation
+    # Approximate: 4 characters ≈ 1 token
+    chars_per_token = 4
+    chunk_chars = chunk_tokens * chars_per_token
+    overlap_chars = overlap_tokens * chars_per_token
+    step_chars = max(1, chunk_chars - overlap_chars)
+    
+    chunk_idx = 0
+    position = 0
+    text_len = len(text)
+    
+    while position < text_len:
+        end_position = min(position + chunk_chars, text_len)
+        chunk_text = text[position:end_position]
+        
+        chunks.append(chunk_text)
+        metadatas.append({
+            "start": position,
+            "end": end_position,
+            "estimated_tokens": count_tokens(chunk_text, model),
+            "chunk_index": chunk_idx
+        })
+        
+        position += step_chars
+        chunk_idx += 1
+    
+    return chunks, metadatas
+
+
+
 def ensure_trace(
     text: str,
     prompt: str,
